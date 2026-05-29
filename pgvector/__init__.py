@@ -239,6 +239,19 @@ class PgvectorMemoryProvider(MemoryProvider):
             or kwargs.get("agent_identity")  # accept 'default' if nothing else set
             or "default"
         )
+
+        # Re-initialization guard (v0.3.1): one registered provider instance
+        # can have initialize() called again for a new session — the gateway
+        # reuses the registered provider rather than constructing a fresh one
+        # per session. Without tearing down the previous session's writer +
+        # pool first, each re-init abandoned a ConnectionPool whose warm
+        # connection lingered in Postgres until idle_session_timeout — the
+        # v0.3.0 connection leak that saturated the server's slots under a
+        # burst of concurrent sessions. shutdown() is idempotent and drains
+        # in-flight writes, so calling it unconditionally here is safe.
+        if self._store is not None or self._writer is not None:
+            self.shutdown()
+
         self._store = MemoryStore(self._config["dsn"])
         try:
             # Schema is verify-only at runtime — admin applies the

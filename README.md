@@ -42,10 +42,25 @@ What was missing: a **storage layer** that gives the built-in `memory` model dur
 
 Internals:
 
-- **`psycopg_pool.ConnectionPool`** (min=1, max=4, lazy + thread-safe) shared across the agent thread and the async-writer drain thread.
+- **`psycopg_pool.ConnectionPool`** (min=0, max=4, lazy + thread-safe, `max_idle=30s` / `max_lifetime=300s`) shared across the agent thread and the async-writer drain thread. `min_size=0` keeps an idle — or abandoned — pool at **zero** open connections, so a session the gateway never explicitly shuts down cannot strand a Postgres backend (see *Fixed in v0.3.1* below).
 - **`AsyncWriter`** — bounded queue + daemon drain thread. Memory write hooks return in microseconds. Worker embeds + writes in the background. Crash-resilient (auto-restart on next enqueue).
 - **Single migration** (`pgvector/migrations/001_schema.sql`) — `memory_entries` + `conversations` + HNSW indexes. Same tuning operators typically use elsewhere.
 - **Boilerplate filter** for turn capture — length floor + acknowledgement regex (`"ok"`, `"thanks"`, `"continue"`, …) so the recall table stays high-signal.
+
+### Fixed in v0.3.1 — connection-leak hotfix
+
+A single registered provider has `initialize()` called again for each new session. It previously
+reassigned `self._store` / `self._writer` without closing the prior ones, **abandoning a
+`ConnectionPool`** whose warm (`min_size=1`) connection lingered in Postgres — committed-but-idle —
+until the server's `idle_session_timeout`. Under a burst of concurrent sessions (e.g. a swarm of
+systemd-run minions firing on the same minute) these orphaned backends saturated the database's
+connection slots. Fixed by:
+
+1. **`initialize()` teardown** — drain the prior `AsyncWriter` + close the prior pool before
+   re-initializing (the call is idempotent and skipped on first init).
+2. **Self-draining pool** — `min_size=0` (an idle or abandoned pool holds *zero* connections) plus
+   `max_idle=30s` / `max_lifetime=300s`, so connections are short-lived when idle and pooled only
+   under active load.
 
 ## Multi-agent / per-minion themes
 

@@ -38,16 +38,27 @@ class MemoryStore:
         self,
         dsn: str,
         *,
-        min_size: int = 1,
+        min_size: int = 0,
         max_size: int = 4,
         timeout: float = 5.0,
+        max_idle: float = 30.0,
+        max_lifetime: float = 300.0,
     ):
-        """Open a lazily-initialized ConnectionPool.
+        """Open a lazily-initialized, self-draining ConnectionPool.
 
-        min_size=1 keeps a single warm connection — enough for the agent
-        thread under low traffic. max_size=4 lets the writer thread + a
-        burst of recall calls overlap. Pool is opened on first use (or
-        explicit `open()`) and closed via `close()`.
+        min_size=0 means an idle pool holds ZERO connections — critical so
+        a pool that gets abandoned (a re-initialized provider, or a session
+        the gateway never explicitly shuts down) cannot strand a warm
+        backend in Postgres until the server's idle_session_timeout reaps
+        it. Under load the pool still grows to max_size=4 so the agent
+        thread and the async-writer drain thread can overlap.
+
+        max_idle (30s) closes connections returned to the pool that then sit
+        unused, shrinking back toward min_size. max_lifetime (300s) caps the
+        absolute age of any pooled connection. Together these keep the
+        connections "short-lived when idle, pooled under load" and bound the
+        plugin's Postgres footprint to actual concurrent demand rather than
+        to the number of sessions ever opened.
         """
         self._dsn = dsn
         self._lock = threading.Lock()
@@ -55,6 +66,8 @@ class MemoryStore:
         self._min_size = min_size
         self._max_size = max_size
         self._timeout = timeout
+        self._max_idle = max_idle
+        self._max_lifetime = max_lifetime
 
     # -- Pool lifecycle ------------------------------------------------------
 
@@ -69,6 +82,8 @@ class MemoryStore:
                     min_size=self._min_size,
                     max_size=self._max_size,
                     timeout=self._timeout,
+                    max_idle=self._max_idle,
+                    max_lifetime=self._max_lifetime,
                     open=True,
                     name="pgvector-memory",
                 )

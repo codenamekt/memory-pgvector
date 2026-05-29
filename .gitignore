@@ -40,3 +40,9 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Local AI/agent planning context — NOT for upstream consumers
+CLAUDE.md
+AGENTS.md
+.planning/
+.claude/
