@@ -3,7 +3,7 @@
 #
 # Profiles:
 #   test  → wait for Postgres + apply migration + run pytest
-#   mcp   → start the MCP server (Phase 3 — not yet implemented)
+#   mcp   → wait for Postgres + apply migration (idempotent) + start MCP server
 #   shell → drop to bash for debugging
 #
 # NOTE: shebang is bash (not sh) so /dev/tcp/host/port connectivity checks work.
@@ -81,9 +81,28 @@ case "$PROFILE" in
         exec pytest tests/ -v --tb=short
         ;;
     mcp)
-        log "profile=mcp — MCP server not yet implemented (Phase 3)"
-        log "dropping to bash for inspection"
-        exec bash
+        # The mcp service is the long-lived MCP server (streamable-http
+        # by default; flip MEMORY_PGVECTOR_TRANSPORT=stdio for an
+        # editor-launched bridge). The entrypoint waits for the schema
+        # to be present (idempotent — apply_migration_as_admin is the
+        # upstream plugin's admin path, but for the mcp container we
+        # use the same psql -f path the test profile uses, since we
+        # have admin creds via PG_TEST_DSN anyway).
+        wait_for_tcp "$PG_TEST_HOST" "${PG_MCP_PORT:-5432}"
+        if psql "${MEMORY_PGVECTOR_DSN:-$PG_TEST_DSN}" -tAc "SELECT to_regclass('memory_entries')" 2>/dev/null | grep -q memory_entries; then
+            log "schema already applied"
+        else
+            log "applying migration to MCP DB"
+            psql "${MEMORY_PGVECTOR_DSN:-$PG_TEST_DSN}" -v ON_ERROR_STOP=1 -f /app/pgvector/migrations/001_schema.sql
+        fi
+        log "starting MCP server (transport=${MEMORY_PGVECTOR_TRANSPORT:-http})"
+        exec memory-pgvector-mcp serve \
+            --transport "${MEMORY_PGVECTOR_TRANSPORT:-http}" \
+            --host "${MCP_HOST:-0.0.0.0}" \
+            --port "${MCP_PORT:-8000}" \
+            --dsn "${MEMORY_PGVECTOR_DSN:-$PG_TEST_DSN}" \
+            --agent-identity "${MEMORY_PGVECTOR_AGENT_IDENTITY:-default}" \
+            --log-level "${MEMORY_PGVECTOR_LOG_LEVEL:-INFO}"
         ;;
     shell|*)
         log "profile=shell — dropping to bash"

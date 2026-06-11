@@ -1,8 +1,10 @@
-# docker/compose.yml — memory-pgvector dev/test stack
+# docker/compose.yml — memory-pgvector dev/test/mcp stack
 #
 # Profiles:
 #   test → CI + local one-shot test runs (pg + test container)
 #   dev  → just the DB; host runs pytest
+#   mcp  → pg + long-lived MCP server (stdio inside the container;
+#          operators expose it to editors/agents via their own bridge)
 #
 # Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)
 
@@ -27,10 +29,10 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
-    # Exposed (not published) so the test container can reach it via the
-    # internal docker network as `pg:5432`. For the dev profile, run with
-    # `--service-ports` to publish 5432 to the host so host-side pytest
-    # can connect at `localhost:5432`.
+    # Exposed (not published) so the test/mcp containers can reach it
+    # via the internal docker network as `pg:5432`. For the dev
+    # profile, run with `--service-ports` to publish 5432 to the host
+    # so host-side pytest can connect at `localhost:5432`.
     expose:
       - "5432"
 
@@ -47,10 +49,49 @@ services:
         condition: service_healthy
     environment:
       CMD_PROFILE: test
+      PYTHONPATH: /app            # the COPY'd source dirs (pgvector, mcp_server) live here
       PG_TEST_HOST: pg
       PG_TEST_PORT: "5432"
       PG_TEST_DSN: "dbname=hermes_test user=postgres password=postgres host=pg"
     # PG_TEST_EMBED_URL is intentionally unset → live embed test skips (Phase 0)
+
+  # Long-lived MCP server. `memory-pgvector-mcp serve --transport http`
+  # binds 0.0.0.0:8000 inside the container; the host port mapping is
+  # commented out by default because most operators want the server on
+  # an internal network only (Claude Desktop / Cursor / fleet agents
+  # talk to it via traefik or a local-only reverse proxy). Uncomment
+  # `ports:` to publish directly to the host.
+  mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    image: memory-pgvector:test
+    container_name: memory-pgvector-mcp
+    profiles: ["mcp"]
+    depends_on:
+      pg:
+        condition: service_healthy
+    environment:
+      CMD_PROFILE: mcp
+      MEMORY_PGVECTOR_TRANSPORT: http
+      MEMORY_PGVECTOR_DSN: "dbname=hermes_test user=postgres password=postgres host=pg"
+      # Default agent_identity for tool calls that don't supply one.
+      # Override per-launch by setting MEMORY_PGVECTOR_AGENT_IDENTITY
+      # in this env or in the operator's compose override.
+      MEMORY_PGVECTOR_AGENT_IDENTITY: "default"
+      # Eager-load the BERT model at startup (saves ~1-2s on first
+      # tool call). Set to "0" for lazy (default).
+      MEMORY_PGVECTOR_EMBED_EAGER_LOAD: "0"
+      HF_HUB_OFFLINE: "1"
+    expose:
+      - "8000"   # streamable-http MCP endpoint, host-port via proxy
+    healthcheck:
+      test: ["CMD", "memory-pgvector-mcp", "doctor", "--dsn", "dbname=hermes_test user=postgres password=postgres host=pg"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   pg_data:

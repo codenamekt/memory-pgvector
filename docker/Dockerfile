@@ -63,8 +63,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 # of nvidia-* libs we don't need on a NUC with no GPU). The
 # sentence-transformers MiniLM-L6-v2 model runs in well under 500MB
 # of RAM on CPU and is plenty fast for the memory hot path.
+#
+# `.[test,mcp]` installs the test extras AND the MCP server SDK
+# (mcp[cli] → FastMCP + uvicorn + starlette for the streamable-http
+# transport). Both are needed for the test container because the
+# tests in tests/test_mcp_server.py exercise the FastMCP wiring.
 RUN pip install --upgrade pip wheel \
-    && pip install --extra-index-url https://download.pytorch.org/whl/cpu ".[test]"
+    && pip install --extra-index-url https://download.pytorch.org/whl/cpu ".[test,mcp]"
 
 # Pre-download the BERT model into HF_HOME. The runtime stage copies
 # that path (which contains the hub/ subdir where huggingface_hub
@@ -110,6 +115,7 @@ COPY --from=deps --chown=hermes:hermes /root/.cache/huggingface /home/hermes/.ca
 
 WORKDIR /app
 COPY --chown=hermes:hermes pgvector/ /app/pgvector/
+COPY --chown=hermes:hermes mcp_server/ /app/mcp_server/
 COPY --chown=hermes:hermes tests/ /app/tests/
 COPY --chown=hermes:hermes docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

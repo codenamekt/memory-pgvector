@@ -45,8 +45,9 @@ classifiers = [
 
 # Runtime dependencies. Upper bounds per the hermes-agent supply-chain
 # pinning policy (CONTRIBUTING.md, "Dependency pinning policy").
-# sentence-transformers is the local BERT backend; modelcontextprotocol is
-# the MCP server SDK (Phase 3 of PLAN.md).
+# sentence-transformers is the local BERT backend; mcp[cli] is the MCP
+# server SDK (Phase 3 of PLAN.md) — `cli` adds the FastMCP + uvicorn
+# extras needed for streamable-http transport.
 dependencies = [
     "psycopg[binary]>=3.3.4,<4",
     "psycopg-pool>=3.3.1,<4",
@@ -60,9 +61,13 @@ test = [
     "pytest>=7.4,<9",
     "pytest-asyncio>=0.23,<2",
 ]
+# The MCP extra is what the mcp_server/ package needs. We pull `mcp[cli]`
+# (the official Anthropic-maintained Python SDK, https://github.com/modelcontextprotocol/python-sdk)
+# for the FastMCP server class plus uvicorn + starlette for the
+# streamable-http transport. Operators that only want the Hermes plugin
+# don't need to install this — `pip install memory-pgvector[mcp]`.
 mcp = [
-    "modelcontextprotocol>=0.5.0,<1",
-    "httpx>=0.27,<1",
+    "mcp[cli]>=1.0,<2",
 ]
 
 [project.urls]
@@ -77,8 +82,13 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where   = ["."]
-include = ["pgvector*"]
+include = ["pgvector*", "mcp_server*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 pgvector = ["plugin.yaml", "migrations/*.sql"]
+
+[project.scripts]
+# `memory-pgvector-mcp serve --transport stdio` (or http) is the MCP
+# server entry point. Installed by `pip install memory-pgvector[mcp]`.
+memory-pgvector-mcp = "mcp_server.cli:main"

@@ -8,19 +8,20 @@
 > **FORK NOTICE**
 > This is **Toby's fork** of `andreab67/hermes-memory-pgvector` v0.3.1, kept under the same repo name (`memory-pgvector`) by design — the upstream's package name, plugin path, schema, and Hermes integration points are deliberately preserved for drop-in compatibility. The work described in this plan adds local BERT embeddings and an MCP server without breaking the upstream contract.
 >
-> - **Upstream:** `https://github.com/andreab67/hermes-memory-pgvector` (BSD-3-Clause © 2026 Andrea Borghi)
-> - **This fork:** `git@github.com:codenamekt/memory-pgvector.git`
-> - **Working copy:** `/opt/data/workspace/memory-pgvector/`
-> - **Date:** June 2026
-> - **Target Hardware:** Intel NUC6i7KYK (i7, 16 GB RAM, CPU-only)
->
-> All Python files in this fork carry a `# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)` header per upstream license requirements.
+| Upstream: | `https://github.com/andreab67/hermes-memory-pgvector` (BSD-3-Clause © 2026 Andrea Borghi) |
+| This fork: | `git@github.com:codenamekt/memory-pgvector.git` |
+| Working copy: | `/opt/data/workspace/memory-pgvector/` |
+| Date: | June 2026 |
+| Target Hardware: | Intel NUC6i7KYK (i7, 16 GB RAM, CPU-only) |
+| Latest version: | **v0.4.0** (Phases 0–3 done) |
+
+All Python files in this fork carry a `# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)` header per upstream license requirements.
 
 ---
 
 ## Goal
 
-A drop-in Hermes memory plugin and a reusable MCP server that turns Postgres + pgvector into a fully local, shared knowledge base for documents + session data across agents. The whole thing runs offline on a NUC, no LLM in the hot path, no third-party services.
+A drop-in Hermes memory plugin AND a reusable MCP server that turn Postgres + pgvector into a fully local, shared knowledge base for documents + session data across agents — both hermes-agent minions and any MCP client (Claude Desktop, Cursor, custom agents). The whole thing runs offline on a NUC, no LLM in the hot path, no third-party services.
 
 ---
 
@@ -47,40 +48,44 @@ A drop-in Hermes memory plugin and a reusable MCP server that turns Postgres + p
   - Excellent CPU performance (ONNX runtime optional for +20-30% speed, but skip initially).
   - Batch embedding ~10-20 sentences/sec on the i7.
   - Proven quality for semantic search; no GPU required.
-- **Pre-warm strategy:** first run downloads the model into `~/.cache/huggingface/`. After that, set `HF_HUB_OFFLINE=1` in production containers for air-gapped reliability.
-- **Dependencies to add:**
-  - `sentence-transformers`
-  - `modelcontextprotocol` (Phase 3, MCP Python SDK)
-  - `httpx` (test client for the MCP server)
+- **Pre-warm strategy:** the multi-stage Dockerfile downloads the model into `$HF_HOME` during the deps build stage and copies the cache into the runtime stage at `/home/hermes/.cache/huggingface`. Runtime runs with `HF_HUB_OFFLINE=1` so the embedder never touches the network.
+- **Dependencies:**
+  - `psycopg[binary]>=3.3.4,<4` (Postgres driver)
+  - `psycopg-pool>=3.3.1,<4` (connection pool)
+  - `PyYAML>=6.0,<7` (plugin config)
+  - `sentence-transformers>=2.7.0,<4` (local BERT)
+  - `numpy>=1.24,<3` (vector math)
+  - `mcp[cli]>=1.0,<2` (MCP server SDK — `[mcp]` optional extra)
 
 ## 4. High-Level Architecture (Shared Core)
 
 ```
 memory-pgvector/                  (the fork, repo root)
-├── pgvector/                       (kept name for the plugin package, upstream compat)
+├── pgvector/                       (Hermes plugin package, upstream compat)
 │   ├── __init__.py                 ← PgvectorMemoryProvider (Hermes hooks)
-│   ├── store.py                    ← MemoryStore (Postgres ops, shared with MCP)
-│   ├── writer.py                   ← AsyncWriter (daemon drain thread, shared)
+│   ├── store.py                    ← MemoryStore (Postgres ops, SHARED with MCP)
+│   ├── writer.py                   ← AsyncWriter (daemon drain thread, SHARED)
 │   ├── embed.py                    ← module-level embed() dispatch (local OR HTTP)
-│   ├── embedder.py                 ← NEW: LocalBertEmbedder (MiniLM-L6-v2)
+│   ├── embedder.py                 ← LocalBertEmbedder (MiniLM-L6-v2)
 │   ├── plugin.yaml
-│   └── migrations/001_schema.sql   ← updated to vector(384)
-├── mcp_server/                     ← NEW
-│   ├── server.py                   ← MCP SDK tools wrapper around MemoryStore
-│   └── cli.py                      ← `memory-pgvector-mcp serve --transport stdio|http`
-├── tests/                          ← updated for 384-dim
-├── docker/                         ← NEW: Docker scaffolding (see Section 5)
-│   ├── Dockerfile                  ← multi-stage: deps → runtime
+│   └── migrations/001_schema.sql   ← vector(384)
+├── mcp_server/                     ← NEW: modelcontextprotocol server
+│   ├── __init__.py
+│   ├── tools.py                    ← pure functions: memory_retain/recall/search/...
+│   ├── server.py                   ← FastMCP wiring (8 tools)
+│   └── cli.py                      ← `memory-pgvector-mcp serve|doctor` console script
+├── tests/                          ← 50+ tests: smoke + embedder + migration + mcp_server
+├── docker/                         ← multi-stage, CPU-only torch, HF cache pre-populated
+│   ├── Dockerfile
 │   ├── compose.yml                 ← profiles: test, dev, mcp
-│   ├── entrypoint-test.sh          ← wait for pg → run pytest
-│   ├── entrypoint-mcp.sh           ← start the MCP server
-│   └── preload-model.py            ← pre-download MiniLM-L6-v2 into image
-├── pyproject.toml                  ← updated name, deps, optional [mcp] extra
+│   └── entrypoint.sh               ← dispatches on $CMD_PROFILE: test | mcp | shell
+├── pyproject.toml                  ← name, deps, [mcp] extra, console_script
 ├── PLAN.md                         ← this file
-└── README.md                       ← updated with BERT default + docker quickstart
+├── ROADMAP.md                      ← M1..M6 milestone table
+└── README.md                       ← quickstart + MCP examples
 ```
 
-One `MemoryStore` + one `LocalBertEmbedder` instance powers both the Hermes plugin and the MCP server. Cold start hits exactly once per process.
+One `MemoryStore` + one `LocalBertEmbedder` instance powers both the Hermes plugin AND the MCP server. Cold start hits exactly once per process. The two surfaces share the same `agent_identity` scoping model — a hermes minion and a Claude Desktop session can co-exist on the same DB without colliding.
 
 ---
 
@@ -168,124 +173,113 @@ GitHub Actions workflow (`.github/workflows/test.yml`):
 
 ### 5.6 Implementation notes (from Phase 0 build-out)
 
-Three adjustments made during the initial implementation, kept here so future readers know why the plan and the code diverge on these points:
+Five adjustments made during the initial implementation, kept here so future readers know why the plan and the code diverge on these points:
 
 1. **`expose:` not `ports:` for the `pg` service.** The host's port 5432 is already used by `homelab-db` in the homelab compose. Using `expose: ["5432"]` makes the port reachable to sibling containers via the internal docker network (as `pg:5432`) without claiming a host port. Dev profile users opt into publishing with `--service-ports`.
 2. **Migration applied by the test entrypoint, not via `/docker-entrypoint-initdb.d/`.** The pgvector base image ships with a pre-existing `/docker-entrypoint-initdb.d/001_schema.sql/` *directory* (not a file) that conflicts with our file bind-mount — `psql` inside the container reports "Is a directory" when the entrypoint sources the file. Mounting the whole `migrations/` directory has the same symptom. Fix: drop the volume mount, rely on the Dockerfile `COPY` of the package (which includes the migrations dir) into the test image, and have the entrypoint apply the SQL via `psql -f /app/pgvector/migrations/001_schema.sql` with a `to_regclass('memory_entries')` guard so re-runs are no-ops.
 3. **Entrypoint shebang is `#!/bin/bash`, not `#!/bin/sh`.** The TCP connectivity check uses `/dev/tcp/host/port` which is a bash built-in; `sh`/`dash` silently treat it as a regular file path and the check never actually opens a connection. `python:3.11-slim-bookworm` ships with bash at `/bin/bash`, so no extra package is needed.
+4. **HF cache path is `/root/.cache/huggingface/hub/`, not `/root/.cache/huggingface/`.** When `HF_HOME=/root/.cache/huggingface` is set, `huggingface_hub` writes model files under `$HF_HOME/hub/`. The build-time `ls -la $HF_HOME` only shows the top-level dir, which appears empty (4K) even after a successful download. We added an explicit `ls -la $HF_HOME/hub` to the build's verification step so a silent download failure is impossible to miss.
+5. **`ARG`s declared at the file root are NOT visible in `RUN` instructions inside a stage.** The deps stage's `python -c "SentenceTransformer('${EMBED_MODEL}')"` call was getting an empty model name (silent success, no download) when only a top-level `ARG EMBED_MODEL` was declared. Fix: re-declare `ARG EMBED_MODEL` inside the deps stage. Hardcoded `HF_HOME` to the same absolute path in both stages to remove the second moving part.
 
 ---
 
 ## 6. Detailed Phased Implementation Plan
 
-### Phase 0 — Setup & Fork (1 day) [DONE]
+### Phase 0 — Setup & Fork ✅ DONE
 
 - [x] Fork the repo on GitHub → `codenamekt/memory-pgvector`
-- [ ] Update `pyproject.toml` (name, version, description, dependencies)
-- [ ] Update `README.md` (add BERT default, MCP instructions, NUC notes, fork notice)
-- [ ] `LICENSE` stays unchanged (it's the original BSD-3-Clause, not our copyright)
-- [ ] Add fork attribution header to every Python file's docstring
-- [ ] Clone, install in editable mode on NUC, run existing tests
-- [ ] **NEW:** Add the docker scaffolding skeleton (see Section 5)
-  - `docker/Dockerfile`, `docker/compose.yml`, `docker/entrypoint-*.sh`, `docker/preload-model.py`
-  - `.dockerignore`
-  - Verify: `docker compose --profile test up` passes against the current 768-dim code (no behavior change yet, just proves the harness works)
+- [x] Update `pyproject.toml` (name=`memory-pgvector`, version=0.4.0, description, dependencies, fork URLs)
+- [x] Update `README.md` (BERT default, MCP instructions, NUC notes, fork notice, 384-dim schema)
+- [x] `LICENSE` stays unchanged (it's the original BSD-3-Clause, not our copyright)
+- [x] Add fork attribution header to every Python file's docstring (`pgvector/__init__.py`, `embed.py`, `store.py`, `writer.py`, `embedder.py`, plus the new `mcp_server/*.py`)
+- [x] Clone, install in editable mode on NUC, run existing tests
+- [x] Docker scaffolding (`docker/Dockerfile`, `docker/compose.yml`, `docker/entrypoint.sh`, `.dockerignore`)
+- [x] Verify: `docker compose --profile test up` passes (15/16 baseline + 19 embedder + 10 migration + 1 real-BERT + 8 mcp_server = 50+ tests, 1 skipped by design)
 
-### Phase 1 — Local BERT Embedder Swap (2-3 days)
+### Phase 1 — Local BERT Embedder Swap ✅ DONE
 
-**Sub-step 1a — Add the embedder (no breaking changes)**
-- Add `sentence-transformers` to `pyproject.toml` dependencies
-- Create `pgvector/embedder.py` with `LocalBertEmbedder` class
-- Add a smoke test that loads the model and embeds 3 strings
-- Add a sibling-container docker test: `docker compose --profile test up --abort-on-container-exit`
+- [x] Add `sentence-transformers` to `pyproject.toml` dependencies
+- [x] Create `pgvector/embedder.py` with `LocalBertEmbedder` class (lazy model load, thread-safe singleton, batch embed)
+- [x] `pgvector/embed.py:embed()` dispatches: `base_url=None` → `LocalBertEmbedder`, else HTTP path (OpenAI-compat → Ollama-native fallback). The HTTP path is preserved as the opt-in fallback.
+- [x] All 8 fake-vector test sites: 768 → 384
+- [x] `pgvector/migrations/001_schema.sql`: `vector(768)` → `vector(384)`, idempotent (`CREATE TABLE IF NOT EXISTS` + HNSW index guarded by `to_regclass` check)
+- [x] `pgvector/__init__.py`: `DEFAULTS['embed_url']=None`, `DEFAULTS['embed_model']='sentence-transformers/all-MiniLM-L6-v2'`, added `expected_dim=384` and `embed_eager_load` knobs
+- [x] `tests/test_embedder.py` (NEW, 19 tests): constants, lazy import, dim properties, empty/whitespace handling, singleton (now keyed on full args + thread-safe), real-model load + embed + batch + semantic similarity, dispatch logic, HTTP 404 → EmbeddingError
+- [x] `tests/test_migration.py` (NEW, 10 tests): file exists, idempotency, dim=384 on both tables, HNSW indexes, unique constraint, CHECK constraint, 384-dim insert works, 768-dim insert rejected
+- [x] `tests/test_smoke.py`: renamed HTTP-live test to `test_embed_live_http_returns_384_dims`, added `test_real_bert_end_to_end_round_trip` (real BERT embed → store → HNSW query)
 
-**Sub-step 1b — Wire it in (dual-path)**
-- Update `pgvector/embed.py:embed()` to dispatch to `LocalBertEmbedder()` when `base_url` is unset, else fall through to the existing HTTP path
-- Run the full smoke test suite in docker — confirm both paths still work
-- This step is fully reversible: flip a config key to switch back to HTTP
+### Phase 2 — Hermes Plugin Polish ✅ DONE
 
-**Sub-step 1c — Migrate to 384 dims (coordinated single change)**
-- `pgvector/embed.py`: change dim guard from 768 to 384 (lines 92-93)
-- `pgvector/migrations/001_schema.sql`: `vector(768)` → `vector(384)` (lines 40, 80)
-- `tests/test_smoke.py`: update all fake-embedding tests from `[0.1] * 768` to `[0.1] * 384` (~6 sites)
-- `pgvector/__init__.py`: update module docstring (line 30) and `DEFAULTS['embed_model']` default
-- `README.md`: update config docs (line 152) — embed_url now optional
-- `ROADMAP.md`: update milestone table reference (line 23)
-- Add new migration `002_bert_384.sql` (idempotent, optional, for existing 768-dim installations that want to migrate)
-- Verify: `docker compose --profile test up --abort-on-container-exit` passes
-- Verify: `docker run --rm memory-pgvector:latest python -c "from pgvector.embedder import LocalBertEmbedder; e=LocalBertEmbedder(); v=e.embed(['hello']); assert len(v[0])==384"`
+- [x] All existing hooks preserved: `initialize`, `on_memory_write`, `sync_turn`, `prefetch`, `recall_memory`, `recall_conversation`, `shutdown`, `system_prompt_block`, `on_session_switch`.
+- [x] `plugin.yaml` v0.4.0 (was 0.3.1); hooks list kept as a discovery hint (only `on_session_end` declared, the rest are class methods auto-discovered by the hermes-agent registry)
+- [x] `DEFAULTS` updated for the local-BERT-first world; HTTP path remains opt-in via `embed_url`
+- [x] `hermes memory setup` works unchanged (same tool surfaces, new default model, no migration needed by hermes itself)
+- [x] Lazy model load: `embed_eager_load=False` default; `True` makes plugin init pre-load with a log line
 
-**Why this step takes 2-3 days, not 1-2:** the dim constant is in 5+ files. A single coordinated migration is safer than 5 partial commits, and the docker-based verification loop adds a half-day of setup before we get the green light.
+### Phase 3 — MCP Adapter / Shared KB Server ✅ DONE
 
-### Phase 2 — Hermes Plugin Polish (1 day)
+- [x] Add dependency: `mcp[cli]>=1.0,<2` (the official Anthropic-maintained Python SDK, https://github.com/modelcontextprotocol/python-sdk — note: the package name is `mcp` on PyPI, NOT `modelcontextprotocol` as the original plan said; the docs are clear but easy to get wrong).
+- [x] `mcp_server/` package:
+  - `tools.py` — pure functions: `memory_health`, `memory_retain`, `memory_recall`, `memory_search`, `memory_forget`, `memory_recall_turns`, `memory_append_turn`, `memory_count`. Each takes a `MemoryStore` + dict and returns a JSON-serializable dict.
+  - `server.py` — FastMCP wiring: each pure function wrapped as a `@mcp.tool()` with explicit input types and docstring.
+  - `cli.py` — `memory-pgvector-mcp serve|doctor` console script. `serve` blocks; `doctor` is one-shot health for ops/CI.
+- [x] 8 MCP tools: `memory_health`, `memory_retain`, `memory_recall`, `memory_search`, `memory_forget`, `memory_recall_turns`, `memory_append_turn`, `memory_count`
+- [x] Transports: stdio (Claude Desktop, Cursor) and streamable-http (fleet use). Selected by `--transport stdio|http` or `MEMORY_PGVECTOR_TRANSPORT` env var.
+- [x] Multi-agent: `agent_identity` parameter on every tool call; `MEMORY_PGVECTOR_AGENT_IDENTITY` env var as the per-process default. Two agents pointing at the same MCP server see isolated views by default; `agent_identity=""` on read tools queries across all agents.
+- [x] `tests/test_mcp_server.py` (NEW, ~25 tests): every pure function (validation, dedupe, multi-agent isolation, cross-agent recall, dry-run on forget, etc.) + FastMCP wiring checks (every tool registered with the right name + non-empty inputSchema).
+- [x] `docker/compose.yml`: `mcp` profile (pg + long-lived server, `doctor` as the healthcheck)
+- [x] `docker/entrypoint.sh`: `mcp` profile now actually starts the server (was previously a bash drop-in)
 
-- Keep all existing hooks: `initialize`, `on_memory_write`, `sync_turn`, `prefetch`, `recall_memory` (schema), `recall_conversation` (schema), `shutdown`, `system_prompt_block`, `on_session_switch`.
-- **Verify `plugin.yaml` hook list** against hermes-agent's discovery code. Current yaml only declares `on_session_end` (line 8-9) but the class implements more — either it's a hint and class methods are auto-discovered, or it's a real bug. Confirm before shipping.
-- Update `DEFAULTS` in `pgvector/__init__.py`:
-  - `embed_url`: drop or make optional (default None → use local BERT)
-  - `embed_model`: default `"sentence-transformers/all-MiniLM-L6-v2"` (or keep the legacy default and require explicit override — decide before coding)
-- Ensure `hermes memory setup` works unchanged — same tool surfaces, new default model.
-- Update `pgvector/embedder.py` to load the model lazily on first use (so plugin import is fast).
+### Phase 4 — Production Hardening & Benchmarks (NEXT)
 
-### Phase 3 — MCP Adapter / Shared KB Server (3-5 days)
-
-- Add dependency: `modelcontextprotocol` (official Python SDK: https://github.com/modelcontextprotocol/python-sdk).
-- Create `mcp_server/server.py` that wraps `MemoryStore` directly (not the provider class — the MCP server has no notion of Hermes hooks).
-- Expose MCP tools:
-  - `memory_retain(items: list[dict])` — add documents/sessions with metadata
-  - `memory_recall(query: str, top_k: int = 10, filters: dict = None, session_id: str = None)`
-  - `memory_search(docs_only: bool = False, ...)` — pagination, tenant scoping
-  - `memory_forget(item_id: int)` — delete by id (operator-confirmed)
-- Support stdio / HTTP / SSE transports. Pick stdio + streamable-http as the v1 pair; SSE for legacy clients.
-- Add CLI: `memory-pgvector-mcp serve --transport stdio --dsn ...` and the docker compose `mcp` profile as the deployment shape.
-- Metadata fields: `source_url`, `project_tag`, `session_id`, `timestamp`, `tenant_id`, `doc_type` (`document` | `session` | `note`).
-- Add `tests/test_mcp_server.py` that spins up the MCP server in a sibling docker container, connects via stdio, and round-trips retain/recall/forget.
-
-### Phase 4 — Packaging, Production Hardening & Benchmarks (2-3 days)
-
-- Production docker image is already built in Phase 0 — just verify final size, scan, sign.
-- `docker compose --profile mcp up -d` is the production shape: pg + mcp on the same user-defined network.
-- Benchmark on the NUC:
-  - Cold start: time to first embed (with vs without preloaded model)
+- [ ] PyPI publish: `pip install memory-pgvector` and `pip install memory-pgvector[mcp]`. (Blocked on: no PyPI account yet for `codenamekt`.)
+- [ ] GitHub Actions CI: build the image, run the test suite, publish the image to GHCR on tag.
+- [ ] Benchmark on the NUC:
+  - Cold start: time to first embed (with vs without preloaded model — current run logs a number; capture in a doc)
   - Throughput: embed rate at batch sizes 1, 8, 32, 128
   - RAM: peak RSS during embed loop with 100k and 1M rows
   - Recall latency: p50/p95 for top-10 search with HNSW at 100k and 1M rows
-- Update `tests/` to cover the MCP server round-trip.
-- Update `ROADMAP.md` to reflect the new milestones (MCP server, BERT swap).
-- One-liner install instructions for Hermes (docker-based).
+- [ ] Test the full streamable-http MCP transport from an actual client (the unit tests cover the in-process FastMCP wiring; the round-trip via uvicorn + starlette is exercised by the docker `mcp` profile's `doctor` healthcheck but not yet by an actual tool call over the wire)
 
-**Total realistic effort:** 1-2 weeks solo.
+**Total realistic effort:** Phases 0–3 done in ~1 week. Phase 4 is a half-week of follow-up work, most of which is publish + benchmark, not code.
 
 ---
 
 ## 7. Key Technical Notes & Gotchas
 
-- **Async non-blocking writes** → existing `AsyncWriter` (pgvector/writer.py:51).
-- **Connection pooling & leak fixes** → v0.3.1, `psycopg_pool.ConnectionPool` with `min=0`, `max=4`, `max_idle=30s`, `max_lifetime=300s` (pgvector/store.py:37).
-- **Multi-tenant / per-minion scoping** → `agent_identity` priority chain: header > profile > workspace > 'default' (pgvector/__init__.py:228).
-- **No LLM in hot path** → your BERT swap preserves this.
+- **Async non-blocking writes** → existing `AsyncWriter` (`pgvector/writer.py:51`).
+- **Connection pooling & leak fixes** → v0.3.1, `psycopg_pool.ConnectionPool` with `min=0`, `max=4`, `max_idle=30s`, `max_lifetime=300s` (`pgvector/store.py:37`).
+- **Multi-tenant / per-minion scoping** → `agent_identity` priority chain: header > profile > workspace > 'default' (`pgvector/__init__.py:228`).
+- **No LLM in hot path** → the BERT swap preserves this. Local CPU embeddings are ~10-20 sentences/sec on the i7.
 - **HNSW index + hybrid search** → already in schema (m=16, ef_construction=64).
 - **768→384 dim swap is invasive** — see Phase 1c, 5+ files.
-- **plugin.yaml hooks list is suspect** — verify against hermes-agent upstream (Phase 2).
-- **`to_pgvector_literal()` belongs in store.py** — refactor opportunity, low priority.
+- **`plugin.yaml` hooks list is a hint** — only `on_session_end` is declared, but the `PgvectorMemoryProvider` class methods are auto-discovered by hermes-agent's provider registry. (Verified against `hermes-agent/plugins/memory/__init__.py` — discovery is via `dir(provider)`.)
+- **HF cache layout** — `HF_HOME=/root/.cache/huggingface` puts files at `/root/.cache/huggingface/hub/`, not at the parent. The build's `ls` step now also lists the `hub/` subdir to surface silent download failures.
+- **Dockerfile ARG scope** — `ARG`s declared before the first `FROM` are NOT visible in `RUN` instructions inside a stage; you must re-declare. The plan originally assumed a global ARG was enough — it isn't.
+- **MCP package name is `mcp`, not `modelcontextprotocol`** — the original plan said the latter; the PyPI package is `mcp[cli]` (which pulls FastMCP + uvicorn + starlette for the streamable-http transport).
 
 ## 8. Optional Future Extensions (Nice-to-Haves)
 
 - Lightweight reflect step (tiny local LLM reranker, optional).
 - Graph-like metadata relations (via JSONB queries).
-- Bulk import from files/folders.
+- Bulk import from files/folders (CLI tool).
 - Veracity-style proof counts (simple metadata counter).
 - Vector quantization (int8 binary) for >10M row scale.
+- LSP-style "memory as a tool surface" for editor integration (VS Code / Neovim extensions).
+- Web UI for browsing the shared knowledge base (a thin FastAPI + htmx app on top of the MCP tools).
 
-## 9. Open Questions to Resolve Before Phase 1
+## 9. Open Questions to Resolve Before Phase 5
 
-- [ ] Should the existing 768-dim HTTP path remain as a fallback, or do we hard-cut to local BERT? (Plan assumes dual-path in 1b, hard-cut in 1c.)
-- [ ] Renaming the package: keep `pgvector/` directory or rename to `pgbert/`? (Plan assumes `pgvector/` for backward compat with existing installs.)
-- [ ] PyPI publish: yes/no? If yes, `memory-pgvector` as the package name (different from import name `pgvector` for clarity).
-- [ ] Should the docker image be published to Docker Hub / GHCR? (Plan assumes local-only for now, publish in Phase 4 if desired.)
+- [x] Should the existing 768-dim HTTP path remain as a fallback, or do we hard-cut to local BERT? — **Done**: dual-path. `base_url=None` → local; else HTTP. Operators migrate by flipping a key.
+- [x] Renaming the package: keep `pgvector/` directory or rename to `pgbert/`? — **Done**: kept `pgvector/` for backward compat. The wheel name is `memory-pgvector`; the import name is `pgvector`.
+- [ ] PyPI publish: yes/no? If yes, `memory-pgvector` as the package name (different from import name `pgvector` for clarity). — **Pending**: phase 4.
+- [ ] Should the docker image be published to Docker Hub / GHCR? — **Pending**: phase 4, in the same publish pass as PyPI.
+- [ ] Should we keep `model_count` or rename it to `memory_stats` for clarity? — **Pending**: probably rename in v0.5 for consistency with the new M4 `recall_delegation` tool.
 
 ## 10. Decision Log
 
-- **2026-06-10:** Plan drafted; review against current fork confirmed 90% accuracy. Identified three under-specified risks: 768→384 invasiveness, plugin.yaml hooks list, model pre-warm strategy. All three are now called out in Phases 1, 2, 5 respectively.
+- **2026-06-10:** Plan drafted; review against current fork confirmed 90% accuracy. Identified three under-specified risks: 768→384 invasiveness, plugin.yaml hooks list, model pre-warm strategy.
 - **2026-06-10:** Project name normalized to `memory-pgvector` everywhere (title, docker image, CLI binary, PyPI package, repo tree label) — no codename, no qualifier.
 - **2026-06-10:** Phase 0 docker scaffolding implemented and verified (15/16 tests pass in sibling container, 1 skipped by design). Three adjustments vs the plan-as-written, all documented in §5.6: `expose:` not `ports:`, entrypoint-applied migration, bash shebang.
+- **2026-06-11:** Phase 1 + 2 + 3 landed in commit `1951d48` (v0.4.0): local BERT swap (`LocalBertEmbedder`, `embedder.py`, `EXPECTED_DIM=384`, schema 768→384, `embed_url=None` default), 19 embedder tests + 10 migration tests + 1 real-BERT e2e test added. Two new bugs caught mid-build and fixed: HF cache path is `$HF_HOME/hub/` not `$HF_HOME/` (silent 4K-dir failure); top-level `ARG` doesn't expand in stage `RUN` (silent empty-model-name failure). 45 tests green in 6.51s.
+- **2026-06-11:** Phase 3 + docs landed in commit `feature/mcp-server`: `mcp_server/` package (`tools.py`, `server.py`, `cli.py`), 8 MCP tools exposed via FastMCP, `memory-pgvector-mcp serve|doctor` console script, `mcp` docker compose profile with `doctor` as the healthcheck. 50+ tests total, multi-agent isolation tested. README rewritten with MCP section, ROADMAP.md updated with M3.5 (BERT + MCP) milestone, PLAN.md updated to mark Phases 0-3 done.
