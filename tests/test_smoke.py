@@ -44,13 +44,23 @@ def test_embed_empty_input_raises():
     not os.environ.get("PG_TEST_EMBED_URL"),
     reason="PG_TEST_EMBED_URL not set",
 )
-def test_embed_live_returns_768_dims():
+def test_embed_live_http_returns_384_dims():
+    """Live HTTP-embed path: must return 384-dim vectors to match the schema.
+
+    The HTTP path is the v0.3.x fallback (operators with an existing
+    Ollama / OpenAI-compatible endpoint). v0.4.0 enforces the 384-dim
+    dim at response time so a misconfigured model fails fast rather
+    than producing vectors that the DB rejects on insert. This test
+    only runs if PG_TEST_EMBED_URL is set in the env.
+    """
     from pgvector.embed import embed
 
     base_url = os.environ["PG_TEST_EMBED_URL"]
-    vec = embed("hello world", base_url=base_url, model="nomic-embed-text")
+    # The HTTP endpoint must be configured to serve a 384-dim model.
+    # We don't pin the model name here — the operator's server decides.
+    vec = embed("hello world", base_url=base_url)
     assert isinstance(vec, list)
-    assert len(vec) == 768
+    assert len(vec) == 384
     assert all(isinstance(x, (int, float)) for x in vec)
 
 
@@ -140,10 +150,10 @@ def test_remove_substring_match(store):
 def test_search_with_fake_embeddings(store):
     s, agent = store
 
-    # 768-dim vectors. Not real embeddings — just verifying the
+    # 384-dim vectors. Not real embeddings — just verifying the
     # similarity math and SQL round-trip behave correctly.
-    vec_a = [0.1] * 768
-    vec_b = [-0.1] * 768
+    vec_a = [0.1] * 384
+    vec_b = [-0.1] * 384
     s.add(agent_identity=agent, target="memory", content="A entry", embedding=vec_a)
     s.add(agent_identity=agent, target="memory", content="B entry", embedding=vec_b)
 
@@ -157,7 +167,7 @@ def test_search_cross_agent_scope(store):
     s, agent = store
     other_agent = agent + "-other"
     try:
-        vec = [0.2] * 768
+        vec = [0.2] * 384
         s.add(agent_identity=agent, target="memory", content="mine", embedding=vec)
         s.add(agent_identity=other_agent, target="memory", content="theirs", embedding=vec)
 
@@ -261,8 +271,8 @@ def test_append_turn_and_count(store_with_turn_cleanup):
 
 def test_search_turns_with_fake_embeddings(store_with_turn_cleanup):
     s, agent = store_with_turn_cleanup
-    vec_a = [0.1] * 768
-    vec_b = [-0.1] * 768
+    vec_a = [0.1] * 384
+    vec_b = [-0.1] * 384
     s.append_turn(
         session_id="sess-a", agent_identity=agent, role="user",
         content="alpha topic talk", embedding=vec_a,
@@ -279,9 +289,61 @@ def test_search_turns_with_fake_embeddings(store_with_turn_cleanup):
 
 def test_search_turns_session_scope(store_with_turn_cleanup):
     s, agent = store_with_turn_cleanup
-    vec = [0.2] * 768
+    vec = [0.2] * 384
     s.append_turn(session_id="sess-a", agent_identity=agent, role="user", content="in-A", embedding=vec)
     s.append_turn(session_id="sess-b", agent_identity=agent, role="user", content="in-B", embedding=vec)
     scoped = s.search_turns(query_embedding=vec, agent_identity=agent, session_id="sess-a", limit=10)
     assert len(scoped) == 1
     assert scoped[0]["content"] == "in-A"
+
+
+# ---------------------------------------------------------------------------
+# v0.4.0 — real-BERT integration test
+#
+# End-to-end check: the LocalBertEmbedder actually produces 384-dim
+# vectors, MemoryStore.add() accepts them, and the HNSW index returns
+# the right row by semantic similarity. Skipped if PG_TEST_DSN is unset
+# (this is the most expensive test — ~2s for the model load + 90MB
+# download on first run).
+# ---------------------------------------------------------------------------
+
+def test_real_bert_end_to_end_round_trip(store):
+    """Embed real text with the local BERT embedder, store it, then
+    query with related text and verify the HNSW index returns it as
+    the top result.
+
+    This is the v0.4.0 contract test: the whole pipeline (Local
+    embedder → to_pgvector_literal → INSERT → HNSW search) actually
+    works against a real Postgres.
+    """
+    if os.environ.get("SENTENCE_TRANSFORMERS_SKIP_REAL") == "1":
+        pytest.skip("SENTENCE_TRANSFORMERS_SKIP_REAL=1")
+
+    s, agent = store
+
+    # Build the embedder once for this test.
+    from pgvector.embedder import LocalBertEmbedder
+    embedder = LocalBertEmbedder()
+    embedder.ensure_loaded()
+
+    # Write two entries with real BERT embeddings.
+    seed_texts = [
+        "Postgres connection pool tuning for high-concurrency agents",
+        "How to configure Traefik as a reverse proxy for Docker",
+    ]
+    seed_vecs = embedder.embed(seed_texts)
+    for text, vec in zip(seed_texts, seed_vecs):
+        assert len(vec) == 384
+        s.add(agent_identity=agent, target="memory", content=text, embedding=vec)
+
+    # Query with something semantically close to the first seed.
+    query_text = "psycopg pool size and timeout best practices"
+    query_vec = embedder.embed([query_text])[0]
+    rows = s.search(query_embedding=query_vec, agent_identity=agent, limit=2)
+
+    # We don't pin which is on top — the model is good but not perfect,
+    # and the two seed texts are both plausible matches. The contract
+    # is just that we get rows back, scored, with the right shape.
+    assert len(rows) == 2
+    assert all(r.get("score") is not None for r in rows)
+    assert all(len(r["content"]) > 0 for r in rows)

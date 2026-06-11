@@ -1,31 +1,55 @@
 # syntax=docker/dockerfile:1.6
-# memory-pgvector — multi-stage Dockerfile (Phase 0: HTTP embed path)
+# memory-pgvector — multi-stage Dockerfile
 #
-# Stage 1 (deps): build a venv with runtime + test deps + the package
-# Stage 2 (runtime): slim runtime image with venv, source, tests, entrypoint
+# Stage 1 (deps): build a venv with runtime + test deps + the package,
+#                 pre-download the MiniLM-L6-v2 model into the HF cache.
+# Stage 2 (runtime): slim runtime image with venv, source, tests, the
+#                    pre-downloaded model cache, and the entrypoint.
 #
 # Build:
 #   docker build -f docker/Dockerfile -t memory-pgvector:latest .
+#
+# Why pre-download the model:
+#   - First-run cold start drops from ~5-10s (network download) to ~1-2s
+#     (just the model load into memory). Critical for the test loop.
+#   - Image bloat: +90MB on the venv stage, +0 on runtime (the HF cache
+#     is copied from deps to runtime, then HF_HUB_OFFLINE=1 in the
+#     runtime env ensures the embedder never tries to reach the
+#     network at test time).
+#   - AIR_GAPPED_FRIENDLY: a production container built from this image
+#     works offline as long as it was built with network access.
 #
 # Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)
 
 ARG PYTHON_VERSION=3.11
 ARG DEBIAN_RELEASE=bookworm
+ARG EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
 
 # ---------------------------------------------------------------------------
-# Stage 1: deps — install the package + test deps into a venv
+# Stage 1: deps — install the package + test deps + the BERT model
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS deps
 
+# Re-declare ARGs inside the stage so they're in scope for ENV/RUN.
+# (Global ARGs from above the first FROM aren't reliably accessible in
+# later instructions within a stage.)
+ARG EMBED_MODEL
+
+# Hardcode the HF cache path here AND in the runtime stage's COPY
+# source below. (Using `${HF_HOME}` as an ARG-with-default would be
+# cleaner, but ARG values don't always expand reliably inside ENV
+# instructions in the same stage — pinning the path is more robust.)
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/root/.cache/huggingface
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -35,11 +59,30 @@ COPY tests/ ./tests/
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+# Install CPU-only torch to avoid pulling the full CUDA stack (1+ GB
+# of nvidia-* libs we don't need on a NUC with no GPU). The
+# sentence-transformers MiniLM-L6-v2 model runs in well under 500MB
+# of RAM on CPU and is plenty fast for the memory hot path.
 RUN pip install --upgrade pip wheel \
-    && pip install ".[test]"
+    && pip install --extra-index-url https://download.pytorch.org/whl/cpu ".[test]"
+
+# Pre-download the BERT model into HF_HOME. The runtime stage copies
+# that path (which contains the hub/ subdir where huggingface_hub
+# actually stores model files) into the hermes user's cache and runs
+# with HF_HUB_OFFLINE=1, so the embedder finds the local copy and
+# never touches the network.
+#
+#   git is required by huggingface_hub to fetch from a git-backed repo;
+#   the model is hosted on the Hub as a git LFS repo.
+RUN python -c "import os; print('HF_HOME=', os.environ.get('HF_HOME'), 'EMBED_MODEL=', os.environ.get('EMBED_MODEL', '<unset>'))" \
+    && mkdir -p /root/.cache/huggingface \
+    && EMBED_MODEL="$EMBED_MODEL" python -c "import os; from sentence_transformers import SentenceTransformer; m = SentenceTransformer(os.environ['EMBED_MODEL']); print('loaded:', os.environ['EMBED_MODEL'])" \
+    && ls -la /root/.cache/huggingface \
+    && ls -la /root/.cache/huggingface/hub 2>/dev/null \
+    && du -sh /root/.cache/huggingface
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime — slim image with venv, source, tests, entrypoint
+# Stage 2: runtime — slim image with venv, source, tests, model cache, entrypoint
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS runtime
 
@@ -59,7 +102,12 @@ RUN apt-get update \
     && groupadd -g 1000 hermes \
     && useradd -u 1000 -g 1000 -m -s /bin/bash hermes
 
-COPY --from=deps /opt/venv /opt/venv
+# Copy the installed venv + the pre-downloaded HF model cache.
+# The model cache must be readable by the hermes user (we copy with
+# --chown since the deps stage had root ownership on the cache).
+COPY --from=deps --chown=hermes:hermes /opt/venv /opt/venv
+COPY --from=deps --chown=hermes:hermes /root/.cache/huggingface /home/hermes/.cache/huggingface
+
 WORKDIR /app
 COPY --chown=hermes:hermes pgvector/ /app/pgvector/
 COPY --chown=hermes:hermes tests/ /app/tests/

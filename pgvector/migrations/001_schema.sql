@@ -1,5 +1,7 @@
 -- 001_schema.sql — pgvector memory plugin schema.
 --
+-- Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+--
 -- TWO tables, both in the existing hermes_memory database:
 --   memory_entries  → mirrors hermes-agent's built-in `memory` tool
 --                     (MEMORY.md / USER.md from tools/memory_tool.py)
@@ -7,12 +9,17 @@
 --                     for cross-session recall of "what did we talk about"
 --
 -- Both scoped per agent_identity (marketing / sales / trading / incident / …),
--- both with 768-dim embeddings, both with HNSW indexes tuned the same way as
+-- both with 384-dim embeddings, both with HNSW indexes tuned the same way as
 -- hermes_memory.events.
 --
 -- Apply once:
 --   sudo -u postgres psql -d hermes_memory -f 001_schema.sql
 -- Idempotent (CREATE IF NOT EXISTS everywhere); safe to re-run.
+--
+-- v0.4.0 (memory-pgvector fork): dim was 768 (nomic-embed-text via HTTP).
+-- Now 384 (sentence-transformers all-MiniLM-L6-v2 local). The schema is
+-- rewritten in place; existing 768-dim installations need to re-embed all
+-- rows before the dim will line up (see README §Migration from v0.3.x).
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -37,7 +44,7 @@ CREATE TABLE IF NOT EXISTS memory_entries (
   target          TEXT NOT NULL CHECK (target IN ('memory', 'user')),
 
   content         TEXT NOT NULL,
-  embedding       vector(768),
+  embedding       vector(384),
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -77,7 +84,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   role            TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
   content         TEXT NOT NULL,
   ts              TIMESTAMPTZ NOT NULL DEFAULT now(),
-  embedding       vector(768),
+  embedding       vector(384),
   metadata        JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 

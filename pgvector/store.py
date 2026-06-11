@@ -1,17 +1,19 @@
 """store.py — Postgres ops for the pgvector memory plugin.
-
-Wraps psycopg3 + psycopg_pool. Mirrors hermes-agent's native built-in
-memory model (`memory` tool's add/replace/remove on targets 'memory' /
-'user') into a single Postgres table with embeddings.
-
-Uses a small ConnectionPool because the plugin is touched from two
-threads at runtime: the agent thread (for prefetch / recall_memory /
-ensure_schema / health) and the async-writer drain thread (for the
-mirrored INSERTs / UPDATEs / DELETEs). Pooling beats short-lived
-connections under that two-thread pattern without adding much
-complexity.
-
-No SQLAlchemy, no LLM-mediated workers, no deriver loops.
+#
+# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+#
+# Wraps psycopg3 + psycopg_pool. Mirrors hermes-agent's native built-in
+# memory model (`memory` tool's add/replace/remove on targets 'memory' /
+# 'user') into a single Postgres table with embeddings.
+#
+# Uses a small ConnectionPool because the plugin is touched from two
+# threads at runtime: the agent thread (for prefetch / recall_memory /
+# ensure_schema / health) and the async-writer drain thread (for the
+# mirrored INSERTs / UPDATEs / DELETEs). Pooling beats short-lived
+# connections under that two-thread pattern without adding much
+# complexity.
+#
+# No SQLAlchemy, no LLM-mediated workers, no deriver loops.
 """
 
 from __future__ import annotations

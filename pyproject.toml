@@ -3,14 +3,15 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hermes-memory-pgvector"
-version = "0.3.1"
-description = "Postgres + pgvector memory provider plugin for hermes-agent. Multi-agent storage layer with per-minion themes, async writer, no LLM in the memory hot path."
+name = "memory-pgvector"
+version = "0.4.0"
+description = "Postgres + pgvector memory provider plugin for hermes-agent, forked from andreab67/hermes-memory-pgvector. Local BERT (MiniLM-L6-v2) embeddings replace the upstream HTTP embedder; multi-agent storage with per-minion themes, async writer, no LLM in the memory hot path."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "BSD-3-Clause" }
 authors = [
-    { name = "Andrea Borghi" },
+    { name = "Toby (fork maintainer)" },
+    { name = "Andrea Borghi", email = "andrea@example.invalid" },
 ]
 keywords = [
     "hermes-agent",
@@ -20,6 +21,11 @@ keywords = [
     "multi-agent",
     "llm-memory",
     "semantic-search",
+    "bert",
+    "sentence-transformers",
+    "local-embeddings",
+    "mcp",
+    "model-context-protocol",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -34,26 +40,37 @@ classifiers = [
     "Topic :: Database",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Distributed Computing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 # Runtime dependencies. Upper bounds per the hermes-agent supply-chain
 # pinning policy (CONTRIBUTING.md, "Dependency pinning policy").
+# sentence-transformers is the local BERT backend; modelcontextprotocol is
+# the MCP server SDK (Phase 3 of PLAN.md).
 dependencies = [
     "psycopg[binary]>=3.3.4,<4",
     "psycopg-pool>=3.3.1,<4",
     "PyYAML>=6.0,<7",
+    "sentence-transformers>=2.7.0,<4",
+    "numpy>=1.24,<3",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=7.4,<9",
+    "pytest-asyncio>=0.23,<2",
+]
+mcp = [
+    "modelcontextprotocol>=0.5.0,<1",
+    "httpx>=0.27,<1",
 ]
 
 [project.urls]
-Homepage      = "https://github.com/andreab67/hermes-memory-pgvector"
-Source        = "https://github.com/andreab67/hermes-memory-pgvector"
-Issues        = "https://github.com/andreab67/hermes-memory-pgvector/issues"
-Roadmap       = "https://github.com/andreab67/hermes-memory-pgvector/blob/main/ROADMAP.md"
+Homepage      = "https://github.com/codenamekt/memory-pgvector"
+Source        = "https://github.com/codenamekt/memory-pgvector"
+Upstream      = "https://github.com/andreab67/hermes-memory-pgvector"
+Issues        = "https://github.com/codenamekt/memory-pgvector/issues"
+Roadmap       = "https://github.com/codenamekt/memory-pgvector/blob/main/PLAN.md"
 
 [tool.setuptools]
 include-package-data = true

@@ -1,32 +1,42 @@
 """pgvector — Postgres + pgvector memory provider for hermes-agent.
-
-Mirrors hermes-agent's built-in `memory` tool entries (MEMORY.md / USER.md
-in tools/memory_tool.py) into a single Postgres table, adds 768-dim
-embeddings for semantic recall, and scopes by `agent_identity` so each
-named agent (marketing / sales / trading / incident / …) has its own
-theme.
-
-Design philosophy: this is a STORAGE LAYER for hermes-agent's native
-memory model, not a new memory model. We don't invent facts, entities,
-trust scores, deriver pipelines, or dialectic synthesis. We give the
-built-in `memory` tool a durable Postgres backing + semantic search,
-nothing more. Honcho went heavy and exploded; this stays lean.
-
-Config in $HERMES_HOME/config.yaml under plugins.pgvector:
-
-    plugins:
-      pgvector:
-        dsn:        "dbname=hermes_memory user=hermes host=/var/run/postgresql"
-        embed_url:  "http://192.168.100.50:11434"
-        embed_model: "nomic-embed-text"
-        prefetch_limit: 5
-        min_similarity: 0.30
-        embed_on_write: true
-        scope_default: "current"   # 'current' | 'all'
-
-Tools exposed: `recall_memory` (one explicit search tool). All built-in
-memory writes (add/replace/remove) are mirrored automatically via the
-on_memory_write hook — no agent-facing change.
+#
+# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+#
+# Mirrors hermes-agent's built-in `memory` tool entries (MEMORY.md / USER.md
+# in tools/memory_tool.py) into a single Postgres table, adds 384-dim
+# embeddings for semantic recall, and scopes by `agent_identity` so each
+# named agent (marketing / sales / trading / incident / …) has its own
+# theme.
+#
+# Design philosophy: this is a STORAGE LAYER for hermes-agent's native
+# memory model, not a new memory model. We don't invent facts, entities,
+# trust scores, deriver pipelines, or dialectic synthesis. We give the
+# built-in `memory` tool a durable Postgres backing + semantic search,
+# nothing more. Honcho went heavy and exploded; this stays lean.
+#
+# v0.4.0 (memory-pgvector fork) — embeddings are produced locally by
+# sentence-transformers all-MiniLM-L6-v2 (see pgvector.embedder) by
+# default. The HTTP-embed path from upstream is preserved as a fallback
+# for operators with an existing Ollama / OpenAI-compatible endpoint
+# (configure `embed_url` in plugin config to use it).
+#
+# Config in $HERMES_HOME/config.yaml under plugins.pgvector:
+#
+#     plugins:
+#       pgvector:
+#         dsn:         "dbname=hermes_memory user=hermes host=/var/run/postgresql"
+#         # No embed_url → use the local sentence-transformers model
+#         embed_url:   null
+#         embed_model: "sentence-transformers/all-MiniLM-L6-v2"
+#         prefetch_limit: 5
+#         min_similarity: 0.30
+#         embed_on_write: true
+#         scope_default: "current"   # 'current' | 'all'
+#         embed_eager_load: false    # set true to load BERT at init
+#
+# Tools exposed: `recall_memory` (one explicit search tool). All built-in
+# memory writes (add/replace/remove) are mirrored automatically via the
+# on_memory_write hook — no agent-facing change.
 """
 
 from __future__ import annotations
@@ -160,8 +170,16 @@ RECALL_MEMORY_SCHEMA = {
 
 DEFAULTS = {
     "dsn": "dbname=hermes_memory user=hermes host=/var/run/postgresql connect_timeout=5",
-    "embed_url": "http://192.168.100.50:11434",
-    "embed_model": "nomic-embed-text",
+    # embed_url=None means "use the local sentence-transformers model"
+    # (see pgvector.embedder.LocalBertEmbedder). Set to an HTTP URL
+    # (e.g. "http://ollama:11434") to fall back to the OpenAI-compatible
+    # /v1/embeddings + Ollama-native /api/embed dispatch in embed.py.
+    "embed_url": None,
+    # sentence-transformers checkpoint name. Default is MiniLM-L6-v2
+    # (384-dim, ~90MB, <500MB RAM, ~20-50 sentences/sec on the NUC i7).
+    # The HTTP path uses this only for the OpenAI-compat request body
+    # (the Ollama-native path uses whatever the server is configured with).
+    "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
     "prefetch_limit": 5,
     "min_similarity": 0.30,
     "embed_on_write": True,
@@ -172,6 +190,17 @@ DEFAULTS = {
     # v0.2 — conversation turn capture
     "sync_turns": True,
     "turn_min_chars": 40,  # turns shorter than this are noise unless > 200 chars or contain tool refs
+    # v0.4.0 — expected embedding dim. Local BERT is 384; HTTP path
+    # must also produce 384-dim vectors (or the operator must override
+    # this in their plugin config). The embed layer validates the dim
+    # at HTTP-response time so a misconfigured model fails fast.
+    "expected_dim": 384,
+    # v0.4.0 — eagerly load the local embedder at plugin init?
+    # Default False: keep import + init fast, pay the cold-start cost
+    # on the first embed call. Set True if you want the model loaded
+    # on a known thread with visible log output, e.g. on the NUC's
+    # gateway boot path.
+    "embed_eager_load": False,
 }
 
 
@@ -288,6 +317,18 @@ class PgvectorMemoryProvider(MemoryProvider or object):
             self._worker,
             maxsize=int(self._config.get("write_queue_maxsize", 256)),
         )
+
+        # v0.4.0 — optionally warm the local embedder now so the cold
+        # start lands on a known thread with a visible log line, rather
+        # than on the first user-facing embed call. Default False.
+        if self._config.get("embed_eager_load", False) and not self._config.get("embed_url"):
+            try:
+                from .embedder import get_default_embedder, DEFAULT_MODEL
+                get_default_embedder(
+                    model_name=self._config.get("embed_model") or DEFAULT_MODEL
+                ).ensure_loaded()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("pgvector eager embed load failed: %s", exc)
 
         # v0.1.1: bulk import existing MEMORY.md / USER.md content so the
         # plugin sees pre-plugin entries + direct file edits, not just the

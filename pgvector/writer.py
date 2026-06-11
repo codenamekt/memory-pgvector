@@ -1,9 +1,11 @@
 """writer.py — async write queue for the pgvector memory plugin.
-
-Decouples `on_memory_write` from the (potentially slow) embed + INSERT
-path. Built-in memory tool fires the hook → we enqueue → background
-thread drains, embeds, writes. The hook returns in microseconds, never
-blocks the agent loop on a slow embed endpoint.
+#
+# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+#
+# Decouples `on_memory_write` from the (potentially slow) embed + INSERT
+# path. Built-in memory tool fires the hook → we enqueue → background
+# thread drains, embeds, writes. The hook returns in microseconds, never
+# blocks the agent loop on a slow embed endpoint.
 
 Failure modes we deliberately swallow:
   • queue full              → drop write, log once, set a tripwire flag
