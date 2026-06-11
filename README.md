@@ -383,6 +383,24 @@ PG_TEST_DSN="dbname=hermes_test user=postgres host=localhost" \
 
 The host-side mode requires `pip install -e ".[test,mcp]"` once. DB tests skip when `PG_TEST_DSN` is unset; the HTTP-embed test skips when `PG_TEST_EMBED_URL` is unset (the local BERT path runs unconditionally — it uses the preloaded model in the docker image).
 
+## Benchmarks
+
+See [`BENCHMARK.md`](BENCHMARK.md) for detailed latency, throughput, and scaling numbers covering:
+
+- LocalBertEmbedder (MiniLM-L6-v2) single/batch embed latency
+- MemoryStore insert + recall at various corpus sizes
+- Multi-agent isolation verification
+- Resource usage (RAM, disk) and scaling projections
+- Instructions for running the benchmark yourself
+
+```bash
+# Quick run (requires docker image + running pg)
+cat benchmarks/bench.py | docker run --rm --entrypoint python \
+  --network memory-pgvector_default \
+  -e PG_TEST_DSN="dbname=hermes_test user=postgres password=postgres host=memory-pgvector-pg" \
+  memory-pgvector:test
+```
+
 ## Roadmap
 
 See [`ROADMAP.md`](ROADMAP.md) for the full milestone table. Highlights:
