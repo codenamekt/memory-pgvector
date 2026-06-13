@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -286,6 +288,8 @@ class MemoryStore:
         target: Optional[str] = None,
         limit: int = 5,
         min_similarity: float = 0.0,
+        decay_half_life_days: float = 0.0,
+        recall_boost_weight: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Semantic recall via cosine distance.
 
@@ -320,8 +324,19 @@ class MemoryStore:
                 )
                 rows = list(cur.fetchall())
 
+        # Apply boost & decay
+        rows = self._apply_recall_boost(rows, recall_boost_weight)
+        rows = self._apply_temporal_decay(rows, decay_half_life_days)
+
+        if decay_half_life_days > 0.0 or recall_boost_weight > 0.0:
+            rows = sorted(rows, key=lambda r: r.get("score", 0.0), reverse=True)
+
         if min_similarity > 0:
             rows = [r for r in rows if (r.get("score") or 0) >= min_similarity]
+
+        if rows:
+            self.increment_recall_counts("memory_entries", [r["id"] for r in rows])
+
         return rows
 
     def hybrid_search(
@@ -335,6 +350,8 @@ class MemoryStore:
         vector_weight: float = 0.7,
         text_weight: float = 0.3,
         min_similarity: float = 0.0,
+        decay_half_life_days: float = 0.0,
+        recall_boost_weight: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Blend semantic vector search and full-text search.
 
@@ -348,11 +365,12 @@ class MemoryStore:
                 target=target,
                 limit=limit,
                 min_similarity=min_similarity,
+                decay_half_life_days=decay_half_life_days,
+                recall_boost_weight=recall_boost_weight,
             )
             for r in rows:
-                r["vector_score"] = r["score"]
+                r["vector_score"] = r.get("vector_score", r.get("score"))
                 r["text_score"] = 0.0
-                r["score"] = vector_weight * r["score"]
             return rows
 
         vec_literal = to_hexus_literal(query_embedding)
@@ -416,8 +434,19 @@ class MemoryStore:
                 cur.execute(sql, all_params)
                 rows = list(cur.fetchall())
 
+        # Apply boost & decay
+        rows = self._apply_recall_boost(rows, recall_boost_weight)
+        rows = self._apply_temporal_decay(rows, decay_half_life_days)
+
+        if decay_half_life_days > 0.0 or recall_boost_weight > 0.0:
+            rows = sorted(rows, key=lambda r: r.get("score", 0.0), reverse=True)
+
         if min_similarity > 0:
             rows = [r for r in rows if (r.get("score") or 0) >= min_similarity]
+
+        if rows:
+            self.increment_recall_counts("memory_entries", [r["id"] for r in rows])
+
         return rows
 
     # -- Bulk import from MEMORY.md / USER.md (v0.1.1) ----------------------
@@ -536,6 +565,8 @@ class MemoryStore:
         session_id: Optional[str] = None,
         limit: int = 5,
         min_similarity: float = 0.0,
+        decay_half_life_days: float = 0.0,
+        recall_boost_weight: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Semantic recall over conversation turns. Same shape as `search()`."""
         vec_literal = to_hexus_literal(query_embedding)
@@ -564,8 +595,19 @@ class MemoryStore:
                 )
                 rows = list(cur.fetchall())
 
+        # Apply boost & decay
+        rows = self._apply_recall_boost(rows, recall_boost_weight)
+        rows = self._apply_temporal_decay(rows, decay_half_life_days)
+
+        if decay_half_life_days > 0.0 or recall_boost_weight > 0.0:
+            rows = sorted(rows, key=lambda r: r.get("score", 0.0), reverse=True)
+
         if min_similarity > 0:
             rows = [r for r in rows if (r.get("score") or 0) >= min_similarity]
+
+        if rows:
+            self.increment_recall_counts("conversations", [r["id"] for r in rows])
+
         return rows
 
     def hybrid_search_turns(
@@ -579,6 +621,8 @@ class MemoryStore:
         vector_weight: float = 0.7,
         text_weight: float = 0.3,
         min_similarity: float = 0.0,
+        decay_half_life_days: float = 0.0,
+        recall_boost_weight: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Blend semantic vector search and full-text search over conversation turns."""
         if not query_text or not query_text.strip():
@@ -588,11 +632,12 @@ class MemoryStore:
                 session_id=session_id,
                 limit=limit,
                 min_similarity=min_similarity,
+                decay_half_life_days=decay_half_life_days,
+                recall_boost_weight=recall_boost_weight,
             )
             for r in rows:
-                r["vector_score"] = r["score"]
+                r["vector_score"] = r.get("vector_score", r.get("score"))
                 r["text_score"] = 0.0
-                r["score"] = vector_weight * r["score"]
             return rows
 
         vec_literal = to_hexus_literal(query_embedding)
@@ -655,8 +700,19 @@ class MemoryStore:
                 cur.execute(sql, all_params)
                 rows = list(cur.fetchall())
 
+        # Apply boost & decay
+        rows = self._apply_recall_boost(rows, recall_boost_weight)
+        rows = self._apply_temporal_decay(rows, decay_half_life_days)
+
+        if decay_half_life_days > 0.0 or recall_boost_weight > 0.0:
+            rows = sorted(rows, key=lambda r: r.get("score", 0.0), reverse=True)
+
         if min_similarity > 0:
             rows = [r for r in rows if (r.get("score") or 0) >= min_similarity]
+
+        if rows:
+            self.increment_recall_counts("conversations", [r["id"] for r in rows])
+
         return rows
 
     # -- Maintenance ---------------------------------------------------------
@@ -715,3 +771,61 @@ class MemoryStore:
                     return {"ok": True, "error": "", "row_count": int(cur.fetchone()[0])}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)[:200], "row_count": 0}
+
+    def _apply_recall_boost(self, rows: List[Dict[str, Any]], boost_weight: float) -> List[Dict[str, Any]]:
+        if boost_weight <= 0.0:
+            return rows
+        for r in rows:
+            meta = r.get("metadata") or {}
+            try:
+                recall_count = int(meta.get("recall_count", 0))
+            except (ValueError, TypeError):
+                recall_count = 0
+            # log-based boost: score * (1 + boost_weight * log(1 + recall_count))
+            r["score"] = r["score"] * (1.0 + boost_weight * math.log(1 + recall_count))
+        return rows
+
+    def _apply_temporal_decay(self, rows: List[Dict[str, Any]], half_life_days: float) -> List[Dict[str, Any]]:
+        if half_life_days <= 0.0:
+            return rows
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            ts_val = r.get("updated_at") or r.get("ts") or r.get("created_at")
+            if isinstance(ts_val, str):
+                try:
+                    from datetime import datetime as dt
+                    ts_val = dt.fromisoformat(ts_val)
+                except Exception:
+                    continue
+            if not ts_val:
+                continue
+            
+            # Ensure ts_val has timezone info (psycopg datetimes are timezone-aware, now is utc)
+            if ts_val.tzinfo is None:
+                ts_val = ts_val.replace(tzinfo=timezone.utc)
+                
+            age_days = (now - ts_val).total_seconds() / 86400.0
+            # exponential decay: score * 2^(-age/half_life)
+            decay = math.exp(-math.log(2.0) * age_days / half_life_days)
+            r["score"] = r["score"] * decay
+        return rows
+
+    def increment_recall_counts(self, table: str, ids: List[int]) -> None:
+        if not ids:
+            return
+        sql = f"""
+        UPDATE {table}
+        SET metadata = jsonb_set(
+            metadata, 
+            '{{recall_count}}', 
+            (COALESCE(metadata->>'recall_count', '0')::int + 1)::text::jsonb
+        )
+        WHERE id = ANY(%s)
+        """
+        try:
+            with self._get_pool().connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (ids,))
+                    conn.commit()
+        except Exception as exc:
+            logger.warning("Failed to increment recall counts for %s: %s", table, exc)

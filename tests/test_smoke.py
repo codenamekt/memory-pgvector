@@ -380,3 +380,68 @@ def test_real_bert_end_to_end_round_trip(store):
     assert rows[0]["content"] == "Postgres connection pool tuning for high-concurrency agents"
     assert all(r.get("score") is not None for r in rows)
     assert all(len(r["content"]) > 0 for r in rows)
+
+
+def test_search_with_decay_and_boost(store):
+    s, agent = store
+    vec = [0.1] * 384
+    id_old = s.add(agent_identity=agent, target="memory", content="old entry", embedding=vec)
+    id_new = s.add(agent_identity=agent, target="memory", content="new entry", embedding=vec)
+
+    # Backdate old entry by 10 days
+    import psycopg
+    from datetime import datetime, timedelta, timezone
+    old_time = datetime.now(timezone.utc) - timedelta(days=10)
+    with psycopg.connect(s._dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE memory_entries SET created_at = %s, updated_at = %s WHERE id = %s",
+                (old_time, old_time, id_old),
+            )
+            conn.commit()
+
+    # Search with decay. The new entry should score higher.
+    rows = s.search(query_embedding=vec, agent_identity=agent, decay_half_life_days=5.0)
+    assert len(rows) == 2
+    assert rows[0]["id"] == id_new
+    assert rows[0]["score"] > rows[1]["score"]
+
+    # Verify that searching incremented the recall count
+    with psycopg.connect(s._dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT metadata FROM memory_entries WHERE id = %s", (id_new,))
+            meta = cur.fetchone()[0] or {}
+            assert int(meta.get("recall_count", 0)) == 1
+
+
+def test_search_turns_with_decay_and_boost(store_with_turn_cleanup):
+    s, agent = store_with_turn_cleanup
+    vec = [0.1] * 384
+    id_old = s.append_turn(session_id="sess-1", agent_identity=agent, role="user", content="old turn", embedding=vec)
+    id_new = s.append_turn(session_id="sess-1", agent_identity=agent, role="user", content="new turn", embedding=vec)
+
+    # Backdate old turn by 10 days
+    import psycopg
+    from datetime import datetime, timedelta, timezone
+    old_time = datetime.now(timezone.utc) - timedelta(days=10)
+    with psycopg.connect(s._dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE conversations SET ts = %s WHERE id = %s",
+                (old_time, id_old),
+            )
+            conn.commit()
+
+    # Search turns with decay. The new turn should score higher.
+    rows = s.search_turns(query_embedding=vec, agent_identity=agent, decay_half_life_days=5.0)
+    assert len(rows) == 2
+    assert rows[0]["id"] == id_new
+    assert rows[0]["score"] > rows[1]["score"]
+
+    # Verify that search_turns incremented the recall count
+    with psycopg.connect(s._dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT metadata FROM conversations WHERE id = %s", (id_new,))
+            meta = cur.fetchone()[0] or {}
+            assert int(meta.get("recall_count", 0)) == 1
+
