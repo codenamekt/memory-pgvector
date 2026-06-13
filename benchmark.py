@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark for memory-pgvector
+Benchmark for hexus
 
 Measures:
 - Cold start time (first embed)
@@ -17,8 +17,8 @@ from typing import List, Dict, Any
 
 # Try to import the actual modules, fallback to mocks if not available
 try:
-    from pgvector.embedder import LocalBertEmbedder
-    from pgvector.store import MemoryStore
+    from hexus.embedder import LocalBertEmbedder
+    from hexus.store import MemoryStore
     print("Using real LocalBertEmbedder and MemoryStore")
 except ImportError as e:
     print(f"Warning: {e}. Using mock implementations.")
@@ -40,7 +40,7 @@ except ImportError as e:
             return [{"id": i, "content": f"result_{i}", "score": 0.9} for i in range(limit)]
 
 def get_dsn():
-    return os.environ.get("MEMORY_PGVECTOR_DSN") or os.environ.get("PG_TEST_DSN") or "dbname=hermes_test user=postgres password=postgres host=localhost"
+    return os.environ.get("HEXUS_DSN") or os.environ.get("PG_TEST_DSN") or "dbname=hermes_test user=postgres password=postgres host=localhost"
 
 def measure_cold_start():
     """Measure time to first embed after process start"""
@@ -162,7 +162,7 @@ def test_store_functionality():
         return False
 
 def main():
-    print("Starting memory-pgvector benchmark...")
+    print("Starting hexus benchmark...")
     print("=" * 50)
     
     # Run benchmarks

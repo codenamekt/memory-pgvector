@@ -1,6 +1,6 @@
-"""store.py — Postgres ops for the pgvector memory plugin.
+"""store.py — Postgres ops for the hexus memory plugin.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+# Forked from andreab67/hermes-hexus (BSD-3-Clause).
 #
 # Wraps psycopg3 + psycopg_pool. Mirrors hermes-agent's native built-in
 # memory model (`memory` tool's add/replace/remove on targets 'memory' /
@@ -29,9 +29,9 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 try:
-    from .embed import to_pgvector_literal
+    from .embed import to_hexus_literal
 except ImportError:
-    from embed import to_pgvector_literal
+    from embed import to_hexus_literal
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class MemoryStore:
                     max_idle=self._max_idle,
                     max_lifetime=self._max_lifetime,
                     open=True,
-                    name="pgvector-memory",
+                    name="hexus-memory",
                 )
         return self._pool
 
@@ -101,7 +101,7 @@ class MemoryStore:
                 try:
                     self._pool.close()
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug("pgvector pool close: %s", exc)
+                    logger.debug("hexus pool close: %s", exc)
                 finally:
                     self._pool = None
 
@@ -129,7 +129,7 @@ class MemoryStore:
                 if cur.fetchone()[0] is None:
                     raise self.SchemaNotApplied(
                         "memory_entries table missing. Apply the migration as DB admin: "
-                        "psql -d <dbname> -f plugins/memory/pgvector/migrations/001_schema.sql"
+                        "psql -d <dbname> -f plugins/memory/hexus/migrations/001_schema.sql"
                     )
 
     def apply_migration_as_admin(self, *, admin_dsn: str) -> None:
@@ -163,7 +163,7 @@ class MemoryStore:
         the (agent_identity, target, content) unique constraint + ON CONFLICT.
         """
         meta_json = json.dumps(metadata or {})
-        vec_literal = to_pgvector_literal(embedding) if embedding is not None else None
+        vec_literal = to_hexus_literal(embedding) if embedding is not None else None
 
         with self._get_pool().connection() as conn:
             with conn.cursor() as cur:
@@ -197,7 +197,7 @@ class MemoryStore:
         update all matches in the same scope for safety).
         """
         vec_literal = (
-            to_pgvector_literal(new_embedding) if new_embedding is not None else None
+            to_hexus_literal(new_embedding) if new_embedding is not None else None
         )
         with self._get_pool().connection() as conn:
             with conn.cursor() as cur:
@@ -251,6 +251,7 @@ class MemoryStore:
         agent_identity: str,
         target: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """List entries in an agent's scope. If target is None, both stores."""
         params: List[Any] = [agent_identity]
@@ -259,6 +260,7 @@ class MemoryStore:
             target_clause = "AND target = %s"
             params.append(target)
         params.append(limit)
+        params.append(offset)
 
         with self._get_pool().connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
@@ -270,6 +272,7 @@ class MemoryStore:
                     {target_clause}
                     ORDER BY updated_at DESC
                     LIMIT %s
+                    OFFSET %s
                     """,
                     params,
                 )
@@ -290,7 +293,7 @@ class MemoryStore:
         target=None → search both 'memory' and 'user'.
         Returns rows with `score` = 1 - cosine_distance ∈ [0, 1].
         """
-        vec_literal = to_pgvector_literal(query_embedding)
+        vec_literal = to_hexus_literal(query_embedding)
         clauses: List[str] = []
         params: List[Any] = []
         if agent_identity:
@@ -412,7 +415,7 @@ class MemoryStore:
         twice is two distinct turns, even verbatim).
         """
         meta_json = json.dumps(metadata or {})
-        vec_literal = to_pgvector_literal(embedding) if embedding is not None else None
+        vec_literal = to_hexus_literal(embedding) if embedding is not None else None
 
         with self._get_pool().connection() as conn:
             with conn.cursor() as cur:
@@ -439,7 +442,7 @@ class MemoryStore:
         min_similarity: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Semantic recall over conversation turns. Same shape as `search()`."""
-        vec_literal = to_pgvector_literal(query_embedding)
+        vec_literal = to_hexus_literal(query_embedding)
         clauses: List[str] = []
         params: List[Any] = []
         if agent_identity:

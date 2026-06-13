@@ -1,8 +1,8 @@
-"""mcp_server — Model Context Protocol server for memory-pgvector.
+"""mcp_server — Model Context Protocol server for hexus.
 
-Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+Forked from andreab67/hermes-hexus (BSD-3-Clause).
 
-Exposes the same Postgres + pgvector memory store that the Hermes plugin
+Exposes the same Postgres + hexus memory store that the Hermes plugin
 uses to any MCP client (Claude Desktop, Cursor, custom agents) as a set
 of `memory_*` tools. One `MemoryStore` + one `LocalBertEmbedder` instance
 is shared by every connected client per process — multiple agents pointing
@@ -16,7 +16,7 @@ Transports:
   - streamable-http : one shared process, N clients; for fleets of agents
                       that want a single canonical memory store
 
-Install:  pip install "memory-pgvector[mcp]"
-Run:      memory-pgvector-mcp serve --transport stdio --dsn "..."
-          memory-pgvector-mcp serve --transport http  --host 0.0.0.0 --port 8000
+Install:  pip install "hexus[mcp]"
+Run:      hexus-mcp serve --transport stdio --dsn "..."
+          hexus-mcp serve --transport http  --host 0.0.0.0 --port 8000
 """

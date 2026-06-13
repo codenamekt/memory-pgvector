@@ -1,12 +1,12 @@
-# memory-pgvector
+# hexus
 
-**Postgres + pgvector memory substrate for [hermes-agent](https://github.com/NousResearch/hermes-agent) AND a standalone MCP server for any MCP client (Claude Desktop, Cursor, fleet agents).** A shared knowledge base for a fleet of cooperating agents — built on Postgres and **local sentence-transformers MiniLM-L6-v2** (no cloud, no LLM in the hot path).
+**Postgres + hexus memory substrate for [hermes-agent](https://github.com/NousResearch/hermes-agent) AND a standalone MCP server for any MCP client (Claude Desktop, Cursor, fleet agents).** A shared knowledge base for a fleet of cooperating agents — built on Postgres and **local sentence-transformers MiniLM-L6-v2** (no cloud, no LLM in the hot path).
 
 ```text
                                                 ┌──────────────────────────────────┐
-each minion → X-Hermes-Session-Key: <theme>     │  memory-pgvector                 │
+each minion → X-Hermes-Session-Key: <theme>     │  hexus                 │
             → hermes-agent gateway              │  (single process, one model)    │
-            → pgvector plugin   ──────────────► ├──────────────────────────────────┤
+            → hexus plugin   ──────────────► ├──────────────────────────────────┤
                                                 │  ┌────────────────────────────┐  │
 Claude Desktop ──── stdio MCP ──┐                │  │ LocalBertEmbedder          │  │
                               │                │  │ (sentence-transformers)    │  │
@@ -19,7 +19,7 @@ custom agent ── http MCP  ────┘       server    │  ┌───�
                                                 │  └────────────────────────────┘  │
                                                 │           │                      │
                                                 │           ▼                      │
-                                                │  Postgres 16 + pgvector           │
+                                                │  Postgres 16 + hexus           │
                                                 └──────────────────────────────────┘
 ```
 
@@ -27,8 +27,8 @@ custom agent ── http MCP  ────┘       server    │  ┌───�
 
 This repo ships two integration paths that share the exact same `MemoryStore` and the exact same `LocalBertEmbedder` instance per process:
 
-1. **Hermes plugin** (`pgvector/__init__.py`) — drop into `~/.hermes/plugins/pgvector/`. Mirrors built-in `memory` writes, captures conversation turns, provides `recall_memory` + `recall_conversation` tools. Per-minion scoping via `X-Hermes-Session-Key`.
-2. **MCP server** (`mcp_server/`) — `memory-pgvector-mcp serve --transport stdio|http`. Exposes the same store as eight MCP tools (`memory_retain`, `memory_recall`, `memory_search`, `memory_forget`, `memory_recall_turns`, `memory_append_turn`, `memory_count`, `memory_health`). Multi-agent: each connected client picks its own `agent_identity`.
+1. **Hermes plugin** (`hexus/__init__.py`) — drop into `~/.hermes/plugins/hexus/`. Mirrors built-in `memory` writes, captures conversation turns, provides `recall_memory` + `recall_conversation` tools. Per-minion scoping via `X-Hermes-Session-Key`.
+2. **MCP server** (`mcp_server/`) — `hexus-mcp serve --transport stdio|http`. Exposes the same store as eight MCP tools (`memory_retain`, `memory_recall`, `memory_search`, `memory_forget`, `memory_recall_turns`, `memory_append_turn`, `memory_count`, `memory_health`). Multi-agent: each connected client picks its own `agent_identity`.
 
 The local BERT swap (sentence-transformers MiniLM-L6-v2, 384-dim, ~88MB on disk, <500MB RAM on CPU) replaces the upstream HTTP-embedder. The HTTP path is preserved as a fallback for operators with an existing Ollama / OpenAI-compatible endpoint.
 
@@ -85,7 +85,7 @@ Eight tools exposed to any MCP client (Claude Desktop, Cursor, custom agents). A
 
 - **`psycopg_pool.ConnectionPool`** (min=0, max=4, lazy + thread-safe, `max_idle=30s` / `max_lifetime=300s`) shared across the agent thread and the async-writer drain thread. `min_size=0` keeps an idle — or abandoned — pool at **zero** open connections, so a session the gateway never explicitly shuts down cannot strand a Postgres backend (see *Fixed in v0.3.1* below).
 - **`AsyncWriter`** — bounded queue + daemon drain thread. Memory write hooks return in microseconds. Worker embeds + writes in the background. Crash-resilient (auto-restart on next enqueue).
-- **Single migration** (`pgvector/migrations/001_schema.sql`) — `memory_entries` + `conversations` + HNSW indexes. Same tuning operators typically use elsewhere.
+- **Single migration** (`hexus/migrations/001_schema.sql`) — `memory_entries` + `conversations` + HNSW indexes. Same tuning operators typically use elsewhere.
 - **Boilerplate filter** for turn capture — length floor + acknowledgement regex (`"ok"`, `"thanks"`, `"continue"`, …) so the recall table stays high-signal.
 
 ### Fixed in v0.3.1 — connection-leak hotfix
@@ -139,41 +139,41 @@ docker compose -f docker/compose.yml --profile mcp logs -f mcp
 
 # Health check (one-shot, JSON, exit 0 if healthy)
 docker compose -f docker/compose.yml --profile mcp exec mcp \
-    memory-pgvector-mcp doctor --dsn "dbname=hermes_test user=postgres password=postgres host=pg"
+    hexus-mcp doctor --dsn "dbname=hermes_test user=postgres password=postgres host=pg"
 ```
 
 The MCP server listens on `0.0.0.0:8000` inside the compose network (streamable-http transport). To expose it to the host, add a `ports: ["8000:8000"]` mapping to the `mcp` service in your compose override.
 
 ### Claude Desktop / Cursor (stdio)
 
-Claude Desktop and Cursor speak MCP over stdio — one MCP server per client process. The cleanest bridge is to run `memory-pgvector-mcp serve --transport stdio` on demand from the editor's MCP config:
+Claude Desktop and Cursor speak MCP over stdio — one MCP server per client process. The cleanest bridge is to run `hexus-mcp serve --transport stdio` on demand from the editor's MCP config:
 
 ```jsonc
 // ~/.config/claude_desktop_config.json (Claude Desktop)
 // or ~/.cursor/mcp.json (Cursor)
 {
   "mcpServers": {
-    "memory-pgvector": {
-      "command": "memory-pgvector-mcp",
+    "hexus": {
+      "command": "hexus-mcp",
       "args": ["serve", "--transport", "stdio"],
       "env": {
-        "MEMORY_PGVECTOR_DSN": "dbname=hermes_memory user=hermes host=/var/run/postgresql",
-        "MEMORY_PGVECTOR_AGENT_IDENTITY": "claude-desktop"
+        "HEXUS_DSN": "dbname=hermes_memory user=hermes host=/var/run/postgresql",
+        "HEXUS_AGENT_IDENTITY": "claude-desktop"
       }
     }
   }
 }
 ```
 
-The `MEMORY_PGVECTOR_AGENT_IDENTITY` env var is the default `agent_identity` for tool calls that don't supply one — pick a stable name per editor so a Claude Desktop session can read/write its own memory without colliding with Cursor's. To share memory between two editors, set both to the same identity. To query across all agents, pass `agent_identity=""` on `memory_recall` / `memory_search`.
+The `HEXUS_AGENT_IDENTITY` env var is the default `agent_identity` for tool calls that don't supply one — pick a stable name per editor so a Claude Desktop session can read/write its own memory without colliding with Cursor's. To share memory between two editors, set both to the same identity. To query across all agents, pass `agent_identity=""` on `memory_recall` / `memory_search`.
 
 ### Multi-agent fleet (streamable-http)
 
-One long-lived server, many connected clients (custom agents, web clients, CI bots). Each picks its own `agent_identity` per call (or via the `MEMORY_PGVECTOR_AGENT_IDENTITY` env var on the client process). The server process is shared, so a single BERT model (~500MB resident) serves every client.
+One long-lived server, many connected clients (custom agents, web clients, CI bots). Each picks its own `agent_identity` per call (or via the `HEXUS_AGENT_IDENTITY` env var on the client process). The server process is shared, so a single BERT model (~500MB resident) serves every client.
 
 ```bash
 # Start the server (docker compose --profile mcp, or directly)
-memory-pgvector-mcp serve --transport http --host 0.0.0.0 --port 8000 \
+hexus-mcp serve --transport http --host 0.0.0.0 --port 8000 \
     --dsn "dbname=hermes_memory user=hermes host=/var/run/postgresql"
 
 # An agent talking to it — point your MCP client at http://localhost:8000/mcp
@@ -190,10 +190,10 @@ from mcp.client.stdio import stdio_client
 
 async def main():
     params = StdioServerParameters(
-        command="memory-pgvector-mcp",
+        command="hexus-mcp",
         args=["serve", "--transport", "stdio"],
-        env={"MEMORY_PGVECTOR_DSN": "dbname=hermes_test user=postgres host=pg",
-             "MEMORY_PGVECTOR_AGENT_IDENTITY": "demo-agent"},
+        env={"HEXUS_DSN": "dbname=hermes_test user=postgres host=pg",
+             "HEXUS_AGENT_IDENTITY": "demo-agent"},
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -202,7 +202,7 @@ async def main():
             h = await session.call_tool("memory_health", {})
             # 2. Add some memory
             await session.call_tool("memory_retain", {
-                "contents": ["Postgres + pgvector is a great choice for semantic memory."],
+                "contents": ["Postgres + hexus is a great choice for semantic memory."],
                 "target": "memory",
             })
             # 3. Recall
@@ -219,7 +219,7 @@ asyncio.run(main())
 
 ```bash
 # One-shot health check; prints JSON, exits 0 if healthy
-memory-pgvector-mcp doctor --dsn "dbname=hermes_memory user=hermes host=/var/run/postgresql"
+hexus-mcp doctor --dsn "dbname=hermes_memory user=hermes host=/var/run/postgresql"
 # {
 #   "status": "ok",
 #   "schema_ok": true,
@@ -234,11 +234,11 @@ The same command is the docker `healthcheck` for the `mcp` service, so a misbeha
 
 ### Option 0: docker (recommended for v0.4.0+)
 
-The whole stack — Postgres + pgvector + the MCP server, or just the test runner — runs through docker compose. This is the only path the fork actively tests.
+The whole stack — Postgres + hexus + the MCP server, or just the test runner — runs through docker compose. This is the only path the fork actively tests.
 
 ```bash
-git clone https://github.com/codenamekt/memory-pgvector.git
-cd memory-pgvector
+git clone https://github.com/codenamekt/hexus.git
+cd hexus
 
 # Run the test suite (15 + 19 + 10 + 8 = ~50 tests, all green in 6-7s)
 docker compose -f docker/compose.yml --profile test up --abort-on-container-exit --exit-code-from test
@@ -256,21 +256,21 @@ The image is multi-stage: deps pre-downloads MiniLM-L6-v2 (88MB) into the runtim
 ### Option 1: clone + run the installer script (legacy)
 
 ```bash
-git clone https://github.com/andreab67/hermes-memory-pgvector.git
-cd hermes-memory-pgvector
+git clone https://github.com/andreab67/hermes-hexus.git
+cd hermes-hexus
 ./scripts/install.sh
 ```
 
 That:
 
 1. `pip install`s `psycopg[binary]`, `psycopg-pool`, `PyYAML` (with the upper-bound pins).
-2. Copies `pgvector/` into `$HERMES_HOME/plugins/pgvector/` (defaults to `~/.hermes/plugins/pgvector/`).
+2. Copies `hexus/` into `$HERMES_HOME/plugins/hexus/` (defaults to `~/.hermes/plugins/hexus/`).
 3. Prints the admin migration + activation commands you run next.
 
 For the MCP server, additionally:
 
 ```bash
-pip install "memory-pgvector[mcp]"   # adds mcp[cli] + uvicorn + starlette
+pip install "hexus[mcp]"   # adds mcp[cli] + uvicorn + starlette
 ```
 
 ### Option 2: manual
@@ -281,7 +281,7 @@ pip install 'psycopg[binary]>=3.3.4,<4' 'psycopg-pool>=3.3.1,<4' 'PyYAML>=6.0,<7
 
 # Plugin module
 mkdir -p ~/.hermes/plugins
-cp -r pgvector ~/.hermes/plugins/pgvector
+cp -r hexus ~/.hermes/plugins/hexus
 ```
 
 ### Then (admin once)
@@ -289,7 +289,7 @@ cp -r pgvector ~/.hermes/plugins/pgvector
 ```bash
 # Apply the schema migration (CREATE EXTENSION needs superuser)
 sudo -u postgres psql -d <your-memory-db> \
-     -f ~/.hermes/plugins/pgvector/migrations/001_schema.sql
+     -f ~/.hermes/plugins/hexus/migrations/001_schema.sql
 
 # Hand ownership of the new tables to the hermes runtime role
 sudo -u postgres psql -d <your-memory-db> -c "
@@ -300,18 +300,18 @@ ALTER SEQUENCE conversations_id_seq OWNER TO hermes;
 "
 
 # Activate
-hermes config set memory.provider pgvector
+hermes config set memory.provider hexus
 sudo systemctl restart hermes.service     # or however you run hermes
-hermes memory status                       # expect: Provider: pgvector; Status: available
+hermes memory status                       # expect: Provider: hexus; Status: available
 ```
 
 ## Configuration
 
-Lives in `$HERMES_HOME/config.yaml` under `plugins.pgvector` — every value optional, sensible defaults shown:
+Lives in `$HERMES_HOME/config.yaml` under `plugins.hexus` — every value optional, sensible defaults shown:
 
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     dsn: "dbname=hermes_memory user=hermes host=/var/run/postgresql"
     # No embed_url → use the local sentence-transformers MiniLM-L6-v2
     # model (default, recommended). Set embed_url to override with an
@@ -361,7 +361,7 @@ CREATE TABLE conversations (
 );
 ```
 
-Indexes: HNSW on each `embedding` column (m=16, ef_construction=64) plus per-agent + per-session btree timelines. Full DDL in [`pgvector/migrations/001_schema.sql`](pgvector/migrations/001_schema.sql).
+Indexes: HNSW on each `embedding` column (m=16, ef_construction=64) plus per-agent + per-session btree timelines. Full DDL in [`hexus/migrations/001_schema.sql`](hexus/migrations/001_schema.sql).
 
 ## Tests
 
@@ -376,7 +376,7 @@ The full test suite runs in docker — see the [docker quickstart](#option-0-doc
 # All in one shot
 docker compose -f docker/compose.yml --profile test up --abort-on-container-exit --exit-code-from test
 
-# Or, against a host-side Postgres+pgvector (the test container doesn't pull the deps):
+# Or, against a host-side Postgres+hexus (the test container doesn't pull the deps):
 PG_TEST_DSN="dbname=hermes_test user=postgres host=localhost" \
   pytest tests/ -v
 ```
@@ -396,9 +396,9 @@ See [`BENCHMARK.md`](BENCHMARK.md) for detailed latency, throughput, and scaling
 ```bash
 # Quick run (requires docker image + running pg)
 cat benchmarks/bench.py | docker run --rm --entrypoint python \
-  --network memory-pgvector_default \
-  -e PG_TEST_DSN="dbname=hermes_test user=postgres password=postgres host=memory-pgvector-pg" \
-  memory-pgvector:test
+  --network hexus_default \
+  -e PG_TEST_DSN="dbname=hermes_test user=postgres password=postgres host=hexus-pg" \
+  hexus:test
 ```
 
 ## Roadmap
@@ -408,7 +408,7 @@ See [`ROADMAP.md`](ROADMAP.md) for the full milestone table. Highlights:
 - **M1 (v0.1, v0.1.1)** ✅ Shared storage with per-agent themes, async writer, connection pool, bulk import from `MEMORY.md`/`USER.md`
 - **M2 (v0.2)** ✅ Conversation transcript table with `sync_turn` capture + `recall_conversation` tool
 - **M3 (v0.3)** ✅ Identity propagation for stateless API minions via `X-Hermes-Session-Key`
-- **M3.5 (v0.4 fork)** ✅ Local BERT swap (MiniLM-L6-v2, 384-dim) + MCP server (`memory-pgvector-mcp serve`) for non-hermes clients
+- **M3.5 (v0.4 fork)** ✅ Local BERT swap (MiniLM-L6-v2, 384-dim) + MCP server (`hexus-mcp serve`) for non-hermes clients
 - **M4 (v0.5 fork)** ⏳ Hybrid search, temporal decay, TTL/memory decay tool — [see upcoming features](UPCOMING.md)
 - **M5 (v0.6 fork)** ⏳ Entity tagging, co-occurrence graph, confidence scoring, session summaries
 - **M6 (v0.7 fork)** ⏳ Cross-encoder reranker, event webhooks, PyPI/GHCR publish
@@ -433,7 +433,7 @@ DROP TABLE IF EXISTS memory_entries;
 "
 
 # Optional — remove the plugin files
-rm -rf ~/.hermes/plugins/pgvector
+rm -rf ~/.hermes/plugins/hexus
 ```
 
 ## Why a standalone plugin (not an upstream PR)?
@@ -442,7 +442,7 @@ Per the hermes-agent [`CONTRIBUTING.md`](https://github.com/NousResearch/hermes-
 
 > We are no longer accepting new memory providers into this repo. The set of built-in providers under `plugins/memory/` is closed. If you want to add a new memory backend, publish it as a standalone plugin repo that users install into `~/.hermes/plugins/` (or via a pip entry point).
 
-The discovery system (`plugins/memory/__init__.py` in hermes-agent) scans `$HERMES_HOME/plugins/<name>/` for any directory whose `__init__.py` calls `register_memory_provider`. This plugin's `pgvector/__init__.py` does exactly that — no upstream change required.
+The discovery system (`plugins/memory/__init__.py` in hermes-agent) scans `$HERMES_HOME/plugins/<name>/` for any directory whose `__init__.py` calls `register_memory_provider`. This plugin's `hexus/__init__.py` does exactly that — no upstream change required.
 
 ## Contributing
 

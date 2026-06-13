@@ -1,6 +1,6 @@
-"""mcp_server.server — FastMCP wiring for memory-pgvector.
+"""mcp_server.server — FastMCP wiring for hexus.
 
-Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+Forked from andreab67/hermes-hexus (BSD-3-Clause).
 
 Each `@server.tool()` registers one of the pure functions in `tools.py`
 as an MCP tool. The MCP transport (stdio or streamable-http) is selected
@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from pgvector.store import MemoryStore
+from hexus.store import MemoryStore
 
 from . import tools
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 def _build_server(
     store: MemoryStore,
     *,
-    name: str = "memory-pgvector",
+    name: str = "hexus",
     instructions: Optional[str] = None,
 ):
     """Build and return a configured `mcp.server.fastmcp.FastMCP` instance.
@@ -43,13 +43,13 @@ def _build_server(
     of the tools trigger an embed — the first embed() call loads the
     model into the process; subsequent calls reuse it.
     """
-    # Imported lazily so `pip install memory-pgvector` (no [mcp] extra)
+    # Imported lazily so `pip install hexus` (no [mcp] extra)
     # doesn't pull mcp as a transitive runtime dep.
     from mcp.server.fastmcp import FastMCP
 
     if instructions is None:
         instructions = (
-            "memory-pgvector exposes a Postgres + pgvector shared knowledge "
+            "hexus exposes a Postgres + hexus shared knowledge "
             "base as MCP tools. All tools take an optional `agent_identity` "
             "argument that scopes writes/reads — every connected agent is "
             "isolated by default, and passes can use `agent_identity=None` "
@@ -84,7 +84,7 @@ def _build_server(
                   'user' (the agent's USER.md mirror). Omit to default
                   to 'memory'.
           agent_identity: which agent's scope to write into. Defaults to
-                          the env var MEMORY_PGVECTOR_AGENT_IDENTITY, then
+                          the env var HEXUS_AGENT_IDENTITY, then
                           'default'. Pick a stable lowercase-dashed name
                           per agent (e.g. 'marketing', 'sales',
                           'intraday-trading').
@@ -275,7 +275,7 @@ def _build_server(
 def build_server(
     dsn: str,
     *,
-    name: str = "memory-pgvector",
+    name: str = "hexus",
     instructions: Optional[str] = None,
 ) -> Any:
     """Build (but don't run) an MCP server for the given DSN.

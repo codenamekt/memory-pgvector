@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Benchmark script for memory-pgvector.
+"""Benchmark script for hexus.
 
 Run inside the docker container:
     docker compose -f docker/compose.yml --profile dev up -d pg
     docker compose -f docker/compose.yml run --rm -e PG_TEST_DSN=... test python benchmarks/bench.py
 
 Or with the test image directly:
-    docker run --rm --network memory-pgvector_default -e PG_TEST_DSN=... memory-pgvector:test python benchmarks/bench.py
+    docker run --rm --network hexus_default -e PG_TEST_DSN=... hexus:test python benchmarks/bench.py
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ import time
 import uuid
 from typing import List
 
-from pgvector.embedder import LocalBertEmbedder, get_default_embedder, reset_default_embedder
-from pgvector.store import MemoryStore
+from hexus.embedder import LocalBertEmbedder, get_default_embedder, reset_default_embedder
+from hexus.store import MemoryStore
 
 
 def benchmark_embedder():
@@ -69,7 +69,7 @@ def benchmark_store(dsn: str):
     
     # Generate test data
     def make_text(i: int) -> str:
-        return f"Document {i}: Postgres pgvector benchmark data for semantic search testing with realistic content about database tuning and vector indexing."
+        return f"Document {i}: Postgres hexus benchmark data for semantic search testing with realistic content about database tuning and vector indexing."
     
     # Pre-embed a corpus
     n_docs = 1000

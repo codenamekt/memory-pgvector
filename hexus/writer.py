@@ -1,6 +1,6 @@
-"""writer.py — async write queue for the pgvector memory plugin.
+"""writer.py — async write queue for the hexus memory plugin.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+# Forked from andreab67/hermes-hexus (BSD-3-Clause).
 #
 # Decouples `on_memory_write` from the (potentially slow) embed + INSERT
 # path. Built-in memory tool fires the hook → we enqueue → background
@@ -104,7 +104,7 @@ class AsyncWriter:
                 self._dropped += 1
                 if not self._dropped_warned:
                     logger.warning(
-                        "pgvector writer queue full (maxsize=%d); dropping writes",
+                        "hexus writer queue full (maxsize=%d); dropping writes",
                         self._queue.maxsize,
                     )
                     self._dropped_warned = True
@@ -121,7 +121,7 @@ class AsyncWriter:
             self._stop.set()
         self._thread.join(timeout=timeout)
         if self._thread.is_alive():
-            logger.warning("pgvector writer thread did not drain within %.1fs", timeout)
+            logger.warning("hexus writer thread did not drain within %.1fs", timeout)
 
     def stats(self) -> Dict[str, Any]:
         return {
@@ -140,7 +140,7 @@ class AsyncWriter:
             self._stop.clear()
             self._thread = threading.Thread(
                 target=self._run,
-                name="pgvector-writer",
+                name="hexus-writer",
                 daemon=True,
             )
             self._thread.start()
@@ -161,7 +161,7 @@ class AsyncWriter:
                 # something slipped through, log and keep going — never
                 # let the drain thread die over one bad write.
                 logger.warning(
-                    "pgvector writer worker raised %s on (%s/%s/%s): %s",
+                    "hexus writer worker raised %s on (%s/%s/%s): %s",
                     type(exc).__name__,
                     item.action,
                     item.agent_identity,

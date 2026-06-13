@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.6
-# memory-pgvector — multi-stage Dockerfile
+# hexus — multi-stage Dockerfile
 #
 # Stage 1 (deps): build a venv with runtime + test deps + the package,
 #                 pre-download the MiniLM-L6-v2 model into the HF cache.
@@ -7,7 +7,7 @@
 #                    pre-downloaded model cache, and the entrypoint.
 #
 # Build:
-#   docker build -f docker/Dockerfile -t memory-pgvector:latest .
+#   docker build -f docker/Dockerfile -t hexus:latest .
 #
 # Why pre-download the model:
 #   - First-run cold start drops from ~5-10s (network download) to ~1-2s
@@ -19,7 +19,7 @@
 #   - AIR_GAPPED_FRIENDLY: a production container built from this image
 #     works offline as long as it was built with network access.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)
+# Forked from andreab67/hermes-hexus (BSD-3-Clause)
 
 ARG PYTHON_VERSION=3.11
 ARG DEBIAN_RELEASE=bookworm
@@ -54,7 +54,7 @@ RUN apt-get update \
 
 WORKDIR /build
 COPY pyproject.toml README.md ./
-COPY pgvector/ ./pgvector/
+COPY hexus/ ./hexus/
 COPY tests/ ./tests/
 
 RUN python -m venv /opt/venv
@@ -114,7 +114,7 @@ COPY --from=deps --chown=hermes:hermes /opt/venv /opt/venv
 COPY --from=deps --chown=hermes:hermes /root/.cache/huggingface /home/hermes/.cache/huggingface
 
 WORKDIR /app
-COPY --chown=hermes:hermes pgvector/ /app/pgvector/
+COPY --chown=hermes:hermes hexus/ /app/hexus/
 COPY --chown=hermes:hermes mcp_server/ /app/mcp_server/
 COPY --chown=hermes:hermes tests/ /app/tests/
 COPY --chown=hermes:hermes docker/entrypoint.sh /usr/local/bin/entrypoint.sh

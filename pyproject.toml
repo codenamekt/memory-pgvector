@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "memory-pgvector"
+name = "hexus"
 version = "0.4.0"
-description = "Postgres + pgvector memory provider plugin for hermes-agent, forked from andreab67/hermes-memory-pgvector. Local BERT (MiniLM-L6-v2) embeddings replace the upstream HTTP embedder; multi-agent storage with per-minion themes, async writer, no LLM in the memory hot path."
+description = "Hexus: Postgres + hexus memory provider plugin for hermes-agent AND a standalone MCP server. Local BERT (MiniLM-L6-v2) embeddings replace the upstream HTTP embedder; multi-agent storage with per-minion themes, async writer, no LLM in the memory hot path."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "BSD-3-Clause" }
@@ -16,7 +16,7 @@ authors = [
 keywords = [
     "hermes-agent",
     "memory-provider",
-    "pgvector",
+    "hexus",
     "postgres",
     "multi-agent",
     "llm-memory",
@@ -26,6 +26,7 @@ keywords = [
     "local-embeddings",
     "mcp",
     "model-context-protocol",
+    "hexus",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -65,30 +66,30 @@ test = [
 # (the official Anthropic-maintained Python SDK, https://github.com/modelcontextprotocol/python-sdk)
 # for the FastMCP server class plus uvicorn + starlette for the
 # streamable-http transport. Operators that only want the Hermes plugin
-# don't need to install this — `pip install memory-pgvector[mcp]`.
+# don't need to install this — `pip install hexus[mcp]`.
 mcp = [
     "mcp[cli]>=1.0,<2",
 ]
 
 [project.urls]
-Homepage      = "https://github.com/codenamekt/memory-pgvector"
-Source        = "https://github.com/codenamekt/memory-pgvector"
-Upstream      = "https://github.com/andreab67/hermes-memory-pgvector"
-Issues        = "https://github.com/codenamekt/memory-pgvector/issues"
-Roadmap       = "https://github.com/codenamekt/memory-pgvector/blob/main/PLAN.md"
+Homepage      = "https://github.com/codenamekt/hexus"
+Source        = "https://github.com/codenamekt/hexus"
+Upstream      = "https://github.com/andreab67/hermes-hexus"
+Issues        = "https://github.com/codenamekt/hexus/issues"
+Roadmap       = "https://github.com/codenamekt/hexus/blob/main/PLAN.md"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 where   = ["."]
-include = ["pgvector*", "mcp_server*"]
+include = ["hexus*", "mcp_server*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-pgvector = ["plugin.yaml", "migrations/*.sql"]
+hexus = ["plugin.yaml", "migrations/*.sql"]
 
 [project.scripts]
-# `memory-pgvector-mcp serve --transport stdio` (or http) is the MCP
-# server entry point. Installed by `pip install memory-pgvector[mcp]`.
-memory-pgvector-mcp = "mcp_server.cli:main"
+# `hexus-mcp serve --transport stdio` (or http) is the MCP
+# server entry point. Installed by `pip install hexus[mcp]`.
+hexus-mcp = "mcp_server.cli:main"

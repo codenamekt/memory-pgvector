@@ -1,6 +1,6 @@
--- 001_schema.sql — pgvector memory plugin schema.
+-- 001_schema.sql — hexus memory plugin schema.
 --
--- Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+-- Forked from andreab67/hermes-hexus (BSD-3-Clause).
 --
 -- TWO tables, both in the existing hermes_memory database:
 --   memory_entries  → mirrors hermes-agent's built-in `memory` tool
@@ -16,7 +16,7 @@
 --   sudo -u postgres psql -d hermes_memory -f 001_schema.sql
 -- Idempotent (CREATE IF NOT EXISTS everywhere); safe to re-run.
 --
--- v0.4.0 (memory-pgvector fork): dim was 768 (nomic-embed-text via HTTP).
+-- v0.4.0 (hexus fork): dim was 768 (nomic-embed-text via HTTP).
 -- Now 384 (sentence-transformers all-MiniLM-L6-v2 local). The schema is
 -- rewritten in place; existing 768-dim installations need to re-embed all
 -- rows before the dim will line up (see README §Migration from v0.3.x).

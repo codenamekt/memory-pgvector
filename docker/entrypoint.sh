@@ -9,7 +9,7 @@
 # NOTE: shebang is bash (not sh) so /dev/tcp/host/port connectivity checks work.
 #       python:3.11-slim-bookworm ships with bash at /bin/bash.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)
+# Forked from andreab67/hermes-hexus (BSD-3-Clause)
 
 set -eu
 
@@ -58,7 +58,7 @@ wait_for_schema() {
 
 apply_migration() {
     dsn="$1"
-    migration="/app/pgvector/migrations/001_schema.sql"
+    migration="/app/hexus/migrations/001_schema.sql"
     log "applying migration from $migration ..."
     if psql "$dsn" -v ON_ERROR_STOP=1 -f "$migration" 2>&1; then
         log "migration applied"
@@ -82,27 +82,27 @@ case "$PROFILE" in
         ;;
     mcp)
         # The mcp service is the long-lived MCP server (streamable-http
-        # by default; flip MEMORY_PGVECTOR_TRANSPORT=stdio for an
+        # by default; flip HEXUS_TRANSPORT=stdio for an
         # editor-launched bridge). The entrypoint waits for the schema
         # to be present (idempotent — apply_migration_as_admin is the
         # upstream plugin's admin path, but for the mcp container we
         # use the same psql -f path the test profile uses, since we
         # have admin creds via PG_TEST_DSN anyway).
         wait_for_tcp "$PG_TEST_HOST" "${PG_MCP_PORT:-5432}"
-        if psql "${MEMORY_PGVECTOR_DSN:-$PG_TEST_DSN}" -tAc "SELECT to_regclass('memory_entries')" 2>/dev/null | grep -q memory_entries; then
+        if psql "${HEXUS_DSN:-$PG_TEST_DSN}" -tAc "SELECT to_regclass('memory_entries')" 2>/dev/null | grep -q memory_entries; then
             log "schema already applied"
         else
             log "applying migration to MCP DB"
-            psql "${MEMORY_PGVECTOR_DSN:-$PG_TEST_DSN}" -v ON_ERROR_STOP=1 -f /app/pgvector/migrations/001_schema.sql
+            psql "${HEXUS_DSN:-$PG_TEST_DSN}" -v ON_ERROR_STOP=1 -f /app/hexus/migrations/001_schema.sql
         fi
-        log "starting MCP server (transport=${MEMORY_PGVECTOR_TRANSPORT:-http})"
-        exec memory-pgvector-mcp serve \
-            --transport "${MEMORY_PGVECTOR_TRANSPORT:-http}" \
+        log "starting MCP server (transport=${HEXUS_TRANSPORT:-http})"
+        exec hexus-mcp serve \
+            --transport "${HEXUS_TRANSPORT:-http}" \
             --host "${MCP_HOST:-0.0.0.0}" \
             --port "${MCP_PORT:-8000}" \
-            --dsn "${MEMORY_PGVECTOR_DSN:-$PG_TEST_DSN}" \
-            --agent-identity "${MEMORY_PGVECTOR_AGENT_IDENTITY:-default}" \
-            --log-level "${MEMORY_PGVECTOR_LOG_LEVEL:-INFO}"
+            --dsn "${HEXUS_DSN:-$PG_TEST_DSN}" \
+            --agent-identity "${HEXUS_AGENT_IDENTITY:-default}" \
+            --log-level "${HEXUS_LOG_LEVEL:-INFO}"
         ;;
     shell|*)
         log "profile=shell — dropping to bash"

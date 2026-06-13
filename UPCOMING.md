@@ -1,6 +1,6 @@
 # Upcoming Features
 
-Features planned for the next phases of memory-pgvector, ordered by impact-to-effort ratio. Every feature is designed for **dual-surface availability** — it is exposed as both an MCP tool (for Claude Desktop, Cursor, fleet agents) and as a Hermes memory plugin tool or hook (for `hermes-agent` minions via the gateway). Both surfaces call the same underlying `MemoryStore` methods; no feature is exclusive to one transport.
+Features planned for the next phases of hexus, ordered by impact-to-effort ratio. Every feature is designed for **dual-surface availability** — it is exposed as both an MCP tool (for Claude Desktop, Cursor, fleet agents) and as a Hermes memory plugin tool or hook (for `hermes-agent` minions via the gateway). Both surfaces call the same underlying `MemoryStore` methods; no feature is exclusive to one transport.
 
 ## Architecture Principle: Dual-Surface by Default
 
@@ -11,7 +11,7 @@ operator configures feature once (pyproject.toml or config.yaml)
     MemoryStore / shared module (single implementation)
          ╱           ╲
    MCP tool       Hermes plugin hook / tool
-   (mcp_server/)  (pgvector/__init__.py)
+   (mcp_server/)  (hexus/__init__.py)
 ```
 
 Every feature below lives in the shared core. The MCP tool and the Hermes hook are thin wrappers — typically 5-10 lines each — that marshal arguments into the same method call.
@@ -49,7 +49,7 @@ LIMIT $4
 ```yaml
 # hermes config.yaml
 plugins:
-  pgvector:
+  hexus:
     hybrid_search:
       enabled: true
       vector_weight: 0.7
@@ -57,8 +57,8 @@ plugins:
       language: "english"        # Postgres text search config
 
 # MCP server env
-MEMORY_PGVECTOR_HYBRID_VECTOR_WEIGHT=0.7
-MEMORY_PGVECTOR_HYBRID_TEXT_WEIGHT=0.3
+HEXUS_HYBRID_VECTOR_WEIGHT=0.7
+HEXUS_HYBRID_TEXT_WEIGHT=0.3
 ```
 
 **Effort:** ~80 lines (new `hybrid_search()` method on `MemoryStore`, one MCP tool, one Hermes tool schema)
@@ -73,8 +73,8 @@ MEMORY_PGVECTOR_HYBRID_TEXT_WEIGHT=0.3
 
 | Surface | Mechanism |
 |---------|-----------|
-| MCP | Applied implicitly to all `memory_recall` / `memory_hybrid_search` results. Configurable via `MEMORY_PGVECTOR_DECAY_HALF_LIFE_DAYS` env var. |
-| Hermes plugin | Applied via `decay_half_life_days` config key in `plugins.pgvector`. Same decay function. |
+| MCP | Applied implicitly to all `memory_recall` / `memory_hybrid_search` results. Configurable via `HEXUS_DECAY_HALF_LIFE_DAYS` env var. |
+| Hermes plugin | Applied via `decay_half_life_days` config key in `plugins.hexus`. Same decay function. |
 
 **Implementation:** Pure post-processing on `MemoryStore.search()` and `MemoryStore.search_turns()` results. No DB changes needed.
 
@@ -96,7 +96,7 @@ def _apply_decay(rows: list[dict], half_life_days: int) -> list[dict]:
 **Config:**
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     decay_half_life_days: 0    # 0 = disabled; 30 = entries half as relevant after 30 days
 ```
 
@@ -125,7 +125,7 @@ WHERE (metadata->>'ttl_deadline')::timestamptz < now();
 **Config:**
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     ttl_cleanup_interval_hours: 24   # how often to run the cleanup query (0 = on init only)
 ```
 
@@ -149,7 +149,7 @@ plugins:
 **Config (both surfaces):**
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     entity_extraction:
       enabled: true
       patterns:
@@ -171,7 +171,7 @@ plugins:
 
 ### 5. Entity Co-occurrence Graph
 
-**What it does:** Given an entity (e.g., `docker_image:traefik`), find all other entities that co-occur with it across memory entries, ranked by co-occurrence count. This gives the agent a "what else is related to X?" query without a separate graph database. See the [full design discussion](https://github.com/codenamekt/memory-pgvector/issues) for the SQL under the hood.
+**What it does:** Given an entity (e.g., `docker_image:traefik`), find all other entities that co-occur with it across memory entries, ranked by co-occurrence count. This gives the agent a "what else is related to X?" query without a separate graph database. See the [full design discussion](https://github.com/codenamekt/hexus/issues) for the SQL under the hood.
 
 **Dual-surface exposure:**
 
@@ -226,7 +226,7 @@ LIMIT $5
 **Config:**
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     confidence:
       enabled: true
       min_confidence: 0.0    # 0 = disabled; 0.5 = only surface entries with >50% confirm rate
@@ -278,7 +278,7 @@ LIMIT $2
 
 | Surface | Mechanism |
 |---------|-----------|
-| MCP | `memory_hybrid_search(rerank=true)` or `MEMORY_PGVECTOR_RERANK=true` env var |
+| MCP | `memory_hybrid_search(rerank=true)` or `HEXUS_RERANK=true` env var |
 | Hermes plugin | Config key `reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"`; if set, all search results are reranked |
 
 **Implementation:** Load the cross-encoder once (shared singleton, like `LocalBertEmbedder`). On every search, rerank the top-50 HNSW results → return the top-K final results.
@@ -286,7 +286,7 @@ LIMIT $2
 **Config:**
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     reranker:
       model: ""                      # empty = disabled
       max_input_length: 512          # tokens per (query, document) pair
@@ -311,7 +311,7 @@ plugins:
 **Config:**
 ```yaml
 plugins:
-  pgvector:
+  hexus:
     webhooks:
       url: ""                        # POST target
       secret: ""                     # HMAC-SHA256 signing secret

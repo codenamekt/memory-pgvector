@@ -1,6 +1,6 @@
 # Benchmarks
 
-Performance baselines for memory-pgvector. These are **reference numbers** — your results will vary based on hardware, Postgres tuning, and workload.
+Performance baselines for hexus. These are **reference numbers** — your results will vary based on hardware, Postgres tuning, and workload.
 
 ## Hardware Reference
 
@@ -52,7 +52,7 @@ The `embed_eager_load: true` plugin option pre-loads at startup, shifting the 50
 
 ---
 
-## MemoryStore: Postgres + pgvector (HNSW)
+## MemoryStore: Postgres + hexus (HNSW)
 
 Test corpus: 1,000 documents, 384-dim vectors, HNSW index (m=16, ef_construction=64).
 
@@ -93,7 +93,7 @@ Test corpus: 1,000 documents, 384-dim vectors, HNSW index (m=16, ef_construction
 | Component | Estimate |
 |-----------|----------|
 | MiniLM-L6-v2 (loaded) | ~500 MB RSS |
-| 1,000 vectors in pgvector | ~3 MB (vectors + HNSW graph) |
+| 1,000 vectors in hexus | ~3 MB (vectors + HNSW graph) |
 | Postgres 16 (idle) | ~50 MB |
 | Postgres (under load) | ~100-150 MB |
 | **Total (container)** | **~650-750 MB** |
@@ -120,19 +120,19 @@ No GPU, no CUDA libraries. Runs on any x86_64 Linux with Docker.
 ### Prerequisites
 
 - Docker + Docker Compose
-- `memory-pgvector:test` image built (`docker compose -f docker/compose.yml --profile test build`)
+- `hexus:test` image built (`docker compose -f docker/compose.yml --profile test build`)
 
 ### One-Liner
 
 ```bash
-# Start Postgres + pgvector
+# Start Postgres + hexus
 docker compose -f docker/compose.yml --profile dev up -d pg
 
 # Run benchmark (mounts this file into the container)
 cat benchmarks/bench.py | docker run --rm --entrypoint python \
-  --network memory-pgvector_default \
-  -e PG_TEST_DSN="dbname=hermes_test user=postgres password=postgres host=memory-pgvector-pg" \
-  memory-pgvector:test
+  --network hexus_default \
+  -e PG_TEST_DSN="dbname=hermes_test user=postgres password=postgres host=hexus-pg" \
+  hexus:test
 ```
 
 ### With Custom Corpus Size
@@ -144,7 +144,7 @@ Edit `bench.py` and change `n_docs = 1000` to your desired size.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PG_TEST_DSN` | (required) | Postgres connection string |
-| `MEMORY_PGVECTOR_EMBED_EAGER_LOAD` | `0` | Set `1` to pre-load model at startup |
+| `HEXUS_EMBED_EAGER_LOAD` | `0` | Set `1` to pre-load model at startup |
 
 ---
 
@@ -158,7 +158,7 @@ Edit `bench.py` and change `n_docs = 1000` to your desired size.
 | Insert throughput | > 200 rows/sec | `autocommit` overhead, network latency |
 | Cross-agent leakage | 0 rows | Bug in `agent_identity` filtering |
 
-For production tuning, see Postgres `pgvector` docs on:
+For production tuning, see Postgres `hexus` docs on:
 - `hnsw.ef_search` (query-time accuracy/speed tradeoff)
 - `work_mem` / `maintenance_work_mem` (index build + query)
 - `max_parallel_workers_per_gather` (parallel index scans)

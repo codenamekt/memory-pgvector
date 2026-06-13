@@ -1,4 +1,4 @@
-"""Smoke tests for the pgvector memory plugin.
+"""Smoke tests for the hexus memory plugin.
 
 These tests target the standalone modules (embed.py, store.py). The
 provider class itself imports hermes-agent internals (agent.memory_provider,
@@ -6,7 +6,7 @@ tools.registry, …) and is only exercised when the plugin runs inside
 hermes-agent.
 
 Run with:
-    pytest plugins/memory/pgvector/tests/
+    pytest plugins/memory/hexus/tests/
 
 DB tests skip when PG_TEST_DSN is unset; embed live tests skip when
 PG_TEST_EMBED_URL is unset.
@@ -21,19 +21,19 @@ import pytest
 
 
 def test_config_env_expansion_supports_shell_forms(monkeypatch):
-    from pgvector import _expand_config_vars
+    from hexus import _expand_config_vars
 
-    monkeypatch.setenv("MEMORY_PGVECTOR_DB_NAME", "hermes_memory")
-    monkeypatch.setenv("MEMORY_PGVECTOR_DB_USER", "hermes_memory")
-    monkeypatch.setenv("MEMORY_PGVECTOR_DB_PASS", "secret")
+    monkeypatch.setenv("HEXUS_DB_NAME", "hermes_memory")
+    monkeypatch.setenv("HEXUS_DB_USER", "hermes_memory")
+    monkeypatch.setenv("HEXUS_DB_PASS", "secret")
 
     cfg = cast(dict[str, str], _expand_config_vars(
         {
             "dsn": (
                 "host=homelab-db "
-                "dbname=${MEMORY_PGVECTOR_DB_NAME:-hermes_memory} "
-                "user=${MEMORY_PGVECTOR_DB_USER:?missing db user} "
-                "password=${MEMORY_PGVECTOR_DB_PASS}"
+                "dbname=${HEXUS_DB_NAME:-hermes_memory} "
+                "user=${HEXUS_DB_USER:?missing db user} "
+                "password=${HEXUS_DB_PASS}"
             )
         }
     ))
@@ -50,16 +50,16 @@ def test_config_env_expansion_supports_shell_forms(monkeypatch):
 # embed.py
 # ---------------------------------------------------------------------------
 
-def test_pgvector_literal_roundtrip():
-    from pgvector.embed import to_pgvector_literal
+def test_hexus_literal_roundtrip():
+    from hexus.embed import to_hexus_literal
 
-    lit = to_pgvector_literal([0.1, -0.25, 0.333333])
+    lit = to_hexus_literal([0.1, -0.25, 0.333333])
     assert lit.startswith("[") and lit.endswith("]")
     assert "0.1" in lit and "-0.25" in lit
 
 
 def test_embed_empty_input_raises():
-    from pgvector.embed import embed, EmbeddingError
+    from hexus.embed import embed, EmbeddingError
 
     with pytest.raises(EmbeddingError):
         embed("", base_url="http://localhost:11434")
@@ -80,7 +80,7 @@ def test_embed_live_http_returns_384_dims():
     than producing vectors that the DB rejects on insert. This test
     only runs if PG_TEST_EMBED_URL is set in the env.
     """
-    from pgvector.embed import embed
+    from hexus.embed import embed
 
     base_url = os.environ["PG_TEST_EMBED_URL"]
     # The HTTP endpoint must be configured to serve a 384-dim model.
@@ -105,7 +105,7 @@ def store():
     if not dsn:
         pytest.skip("PG_TEST_DSN not set")
 
-    from pgvector.store import MemoryStore
+    from hexus.store import MemoryStore
 
     s = MemoryStore(dsn)
     s.ensure_schema()
@@ -234,7 +234,7 @@ def test_bulk_upsert_md_skips_existing(store, tmp_path):
         "\n§\n"
         "second note: the gateway runs on port 8642"
         "\n§\n"
-        "third note: prefer pgvector over Holographic"
+        "third note: prefer hexus over Holographic"
     )
 
     # First run: inserts 3 rows. embed_fn=None → text-only writes.
@@ -340,7 +340,7 @@ def test_real_bert_end_to_end_round_trip(store):
     the top result.
 
     This is the v0.4.0 contract test: the whole pipeline (Local
-    embedder → to_pgvector_literal → INSERT → HNSW search) actually
+    embedder → to_hexus_literal → INSERT → HNSW search) actually
     works against a real Postgres.
     """
     if os.environ.get("SENTENCE_TRANSFORMERS_SKIP_REAL") == "1":
@@ -349,7 +349,7 @@ def test_real_bert_end_to_end_round_trip(store):
     s, agent = store
 
     # Build the embedder once for this test.
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
     embedder = LocalBertEmbedder()
     embedder.ensure_loaded()
 

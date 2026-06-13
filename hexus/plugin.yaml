@@ -1,0 +1,13 @@
+name: hexus
+version: 0.4.0
+description: "Postgres + hexus storage layer for hermes-agent + MCP server. Mirrors built-in MEMORY.md / USER.md + captures every substantive (user, assistant) chat turn into a conversations table. Per-agent themes (marketing/sales/trading/incident/morning-report/…) via X-Hermes-Session-Key header — every systemd-run minion gets its own scope. 384-dim local BERT (MiniLM-L6-v2) embeddings by default, with HTTP-embed fallback for operators with an existing Ollama endpoint. Async writer + connection pool. No LLM mediation. The same store is exposed as an MCP server (`hexus-mcp serve`) for non-hermes agents (Claude Desktop, Cursor, fleet agents) — one process, one model load, one shared knowledge base."
+pip_dependencies:
+  - "psycopg[binary]>=3.3.4"
+  - "psycopg-pool>=3.3.1"
+requires_env: []
+# Plugin hooks implemented by HexusMemoryProvider (in hexus/__init__.py).
+# The class methods are auto-discovered by hermes-agent's provider registry
+# (see hermes-agent/plugins/memory/__init__.py); only listing them here
+# would be a useful metadata hint but isn't required for discovery.
+hooks:
+  - on_session_end

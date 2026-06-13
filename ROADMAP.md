@@ -1,4 +1,4 @@
-# memory-pgvector — Roadmap
+# hexus — Roadmap
 
 A versioned plan for evolving the plugin from "Postgres storage for a single agent" to "shared memory substrate for a fleet of cooperating hermes-agent minions AND any MCP client." The driving constraint throughout is **deliver multi-agent memory on the resources you already have** — your existing Postgres, a single in-process embedder, no LLM costs in the memory hot path, no third-party services.
 
@@ -52,7 +52,7 @@ The plugin is built around a clear separation of concerns:
 
 ### M3 — Identity propagation for stateless API minions (v0.3) ✅ DONE
 
-**Problem solved:** before v0.3, every systemd-run minion (`marketing-daily.py`, `sales-daily.py`, intraday workers, morning-report enrich) hit the gateway via `POST /v1/chat/completions` and the gateway forwarded a `gateway_session_key` kwarg (from the built-in `X-Hermes-Session-Key` header), but the pgvector plugin didn't consume it — every API-routed write collapsed to `agent_identity='default'`. The per-theme isolation promised in M1 was theoretical for fleet-style use.
+**Problem solved:** before v0.3, every systemd-run minion (`marketing-daily.py`, `sales-daily.py`, intraday workers, morning-report enrich) hit the gateway via `POST /v1/chat/completions` and the gateway forwarded a `gateway_session_key` kwarg (from the built-in `X-Hermes-Session-Key` header), but the hexus plugin didn't consume it — every API-routed write collapsed to `agent_identity='default'`. The per-theme isolation promised in M1 was theoretical for fleet-style use.
 
 | Capability | Version |
 |---|---|
@@ -80,7 +80,7 @@ The plugin is built around a clear separation of concerns:
 **Goal:** make the memory substrate a real fleet product. Two changes shipped together because they're complementary:
 
 1. **Local BERT swap** — replace the upstream 768-dim HTTP embedder (Ollama / OpenAI-compatible) with a local sentence-transformers MiniLM-L6-v2 (384-dim, ~88MB on disk, <500MB RAM on CPU, no GPU required). The HTTP path is preserved as a fallback for operators with an existing embed service. Why: the CPU model runs in well under 500MB, the test loop doesn't depend on an external service being reachable, and the v0.4.0 docker image is fully air-gapped at runtime (`HF_HUB_OFFLINE=1`).
-2. **MCP server** — expose the same `MemoryStore` to any MCP client (Claude Desktop, Cursor, custom agents) as eight tools (`memory_retain`, `memory_recall`, `memory_search`, `memory_forget`, `memory_recall_turns`, `memory_append_turn`, `memory_count`, `memory_health`). Multi-agent: each connected client picks its own `agent_identity` per call (or via the `MEMORY_PGVECTOR_AGENT_IDENTITY` env var on the client process). The server is a single process — one model load, one shared knowledge base — and supports both `stdio` (Claude Desktop / Cursor) and `streamable-http` (fleet use) transports.
+2. **MCP server** — expose the same `MemoryStore` to any MCP client (Claude Desktop, Cursor, custom agents) as eight tools (`memory_retain`, `memory_recall`, `memory_search`, `memory_forget`, `memory_recall_turns`, `memory_append_turn`, `memory_count`, `memory_health`). Multi-agent: each connected client picks its own `agent_identity` per call (or via the `HEXUS_AGENT_IDENTITY` env var on the client process). The server is a single process — one model load, one shared knowledge base — and supports both `stdio` (Claude Desktop / Cursor) and `streamable-http` (fleet use) transports.
 
 | Capability | Version |
 |---|---|
@@ -89,9 +89,9 @@ The plugin is built around a clear separation of concerns:
 | Schema migrates `vector(768)` → `vector(384)` in the same idempotent migration | v0.4.0 ✅ |
 | Multi-stage Dockerfile: deps pre-downloads MiniLM, runtime is hermes user + HF_HUB_OFFLINE=1 | v0.4.0 ✅ |
 | `mcp_server/` package: pure tool functions in `tools.py`, FastMCP wiring in `server.py`, CLI in `cli.py` | v0.4.0 ✅ |
-| `memory-pgvector-mcp serve` (stdio / streamable-http) + `memory-pgvector-mcp doctor` (one-shot health) | v0.4.0 ✅ |
+| `hexus-mcp serve` (stdio / streamable-http) + `hexus-mcp doctor` (one-shot health) | v0.4.0 ✅ |
 | Eight MCP tools covering retain / recall / search / forget / turn-append / turn-recall / count / health | v0.4.0 ✅ |
-| Per-tool `agent_identity` arg + `MEMORY_PGVECTOR_AGENT_IDENTITY` env var — multi-agent out of the box | v0.4.0 ✅ |
+| Per-tool `agent_identity` arg + `HEXUS_AGENT_IDENTITY` env var — multi-agent out of the box | v0.4.0 ✅ |
 | Docker `mcp` profile: pg + long-lived server, with `doctor` as the healthcheck | v0.4.0 ✅ |
 | 50+ tests (smoke + embedder + migration + mcp server + FastMCP wiring) all green in docker in ~7s | v0.4.0 ✅ |
 
@@ -127,7 +127,7 @@ The plugin is built around a clear separation of concerns:
 | Bulk-import CLI for migrating from Holographic / Honcho / Mem0 / Hindsight installations | v0.6.0 |
 | Metrics: queue depth, drop count, embed latency p50/p95, recall hit rate (Prometheus-friendly) | v0.7.0 |
 | Per-platform metadata facets (CLI vs cron vs telegram vs API) for richer recall filtering | v0.7.0 |
-| PyPI publish (`pip install memory-pgvector` and `pip install memory-pgvector[mcp]`) | v0.7.0 |
+| PyPI publish (`pip install hexus` and `pip install hexus[mcp]`) | v0.7.0 |
 | GitHub Actions CI: build the image, run the test suite, publish the image to GHCR on tag | v0.7.0 |
 
 **Why this matters for multi-agent deployments:** a memory store that's fast for one user often falls over under fleet load. M5 is the slow + boring work that turns "works on my hermes" into "works for ten agents writing concurrently — and for ten non-hermes MCP clients reading concurrently."
@@ -140,7 +140,7 @@ The plugin is built around a clear separation of concerns:
 
 | Capability | Version |
 |---|---|
-| Stable config schema (semver guarantees on `plugins.pgvector.*` keys + MCP tool input schemas) | v1.0.0 |
+| Stable config schema (semver guarantees on `plugins.hexus.*` keys + MCP tool input schemas) | v1.0.0 |
 | Full hermes-agent docs page with config reference, scaling guide, troubleshooting | v1.0.0 |
 | Coverage: store + mcp tests in upstream CI against a Postgres service container | v1.0.0 |
 | Conformance test: validate `MemoryProvider` ABC contract against current upstream | v1.0.0 |
@@ -152,7 +152,7 @@ The plugin is built around a clear separation of concerns:
 
 These were considered and rejected. Keeping the list visible so it's clear the omissions are deliberate, not gaps.
 
-- **A `fact_store` ontology with trust scoring, entity resolution, and HRR algebra.** Holographic does that well. Layering it in pgvector would duplicate Holographic's surface and force agents to learn a second memory model when the built-in `memory` tool already serves the same need.
+- **A `fact_store` ontology with trust scoring, entity resolution, and HRR algebra.** Holographic does that well. Layering it in hexus would duplicate Holographic's surface and force agents to learn a second memory model when the built-in `memory` tool already serves the same need.
 - **LLM-mediated dialectic recall** (à la Honcho). The synchronous LLM call in the memory hot path is exactly the failure mode that motivated this plugin. We embed text; we don't reason about it. The agent reasons.
 - **Background deriver / fact-extraction pipelines.** Same reason: any background LLM loop becomes a retry-storm liability. Fact extraction stays explicit (the agent decides to call `memory.add`) instead of implicit (a daemon thread scrapes turns).
 - **Multi-tenant authentication / RBAC at the plugin layer.** Postgres roles + `agent_identity` scoping are sufficient. Anything fancier belongs in a separate access layer, not in a memory provider.

@@ -1,6 +1,6 @@
 """mcp_server.tools — pure functions implementing the MCP tool surface.
 
-Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+Forked from andreab67/hermes-hexus (BSD-3-Clause).
 
 These functions are transport-agnostic; `server.py` wraps each one as an
 MCP tool. They're also the unit-test surface — every tool is testable
@@ -24,8 +24,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from pgvector.embed import EmbeddingError, embed
-from pgvector.store import MemoryStore
+from hexus.embed import EmbeddingError, embed
+from hexus.store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,12 @@ def default_agent_identity() -> str:
     """Return the default `agent_identity` to use when a tool call omits it.
 
     Resolution order:
-      1. MEMORY_PGVECTOR_AGENT_IDENTITY env var (set per-client process
+      1. HEXUS_AGENT_IDENTITY env var (set per-client process
          in the docker compose `mcp` service, or in the host environment
          for a stdio-launched client)
       2. "default" — same as the upstream plugin's last-resort bucket.
     """
-    return os.environ.get("MEMORY_PGVECTOR_AGENT_IDENTITY", "default")
+    return os.environ.get("HEXUS_AGENT_IDENTITY", "default")
 
 
 # -----------------------------------------------------------------------
@@ -64,7 +64,7 @@ def memory_health(store: MemoryStore, args: Dict[str, Any]) -> Dict[str, Any]:
     row count. Always succeeds if Postgres is reachable, even if the
     embedder isn't loaded yet (lazy load).
     """
-    from pgvector.embedder import DEFAULT_MODEL, DEFAULT_DIM
+    from hexus.embedder import DEFAULT_MODEL, DEFAULT_DIM
 
     try:
         store.ensure_schema()
@@ -83,7 +83,7 @@ def memory_health(store: MemoryStore, args: Dict[str, Any]) -> Dict[str, Any]:
         "embedder": {
             "model": DEFAULT_MODEL,
             "dim": DEFAULT_DIM,
-            "eager_loaded": os.environ.get("MEMORY_PGVECTOR_EMBED_EAGER_LOAD", "0")
+            "eager_loaded": os.environ.get("HEXUS_EMBED_EAGER_LOAD", "0")
             == "1",
         },
         "row_counts": {
@@ -267,19 +267,9 @@ def memory_search(store: MemoryStore, args: Dict[str, Any]) -> Dict[str, Any]:
     if offset < 0:
         offset = 0
 
-    # MemoryStore.list_entries doesn't take offset; emulate with a
-    # slightly-larger fetch and slice. For v1 this is fine (paginating
-    # memory_entries is rare in practice).
-    if offset == 0:
-        rows = store.list_entries(
-            agent_identity=agent, target=target, limit=limit
-        )
-    else:
-        # Fetch limit+offset and slice — not ideal, but adequate for v1.
-        all_rows = store.list_entries(
-            agent_identity=agent, target=target, limit=limit + offset
-        )
-        rows = all_rows[offset:]
+    rows = store.list_entries(
+        agent_identity=agent, target=target, limit=limit, offset=offset
+    )
 
     return {
         "count": len(rows),
@@ -449,7 +439,7 @@ def _embed_batch(texts: List[str]) -> List[List[float]]:
     model.encode() call. The HTTP path embeds one at a time (limitation
     of the upstream embed() function) — fine for low-volume MCP traffic,
     not for bulk import. Callers that need bulk import should use the
-    underlying `pgvector.embedder.LocalBertEmbedder` directly."""
+    underlying `hexus.embedder.LocalBertEmbedder` directly."""
     return [embed(t) for t in texts]
 
 

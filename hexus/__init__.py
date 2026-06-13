@@ -1,6 +1,6 @@
-"""pgvector — Postgres + pgvector memory provider for hermes-agent.
+"""hexus — Postgres + hexus memory provider for hermes-agent.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+# Forked from andreab67/hermes-hexus (BSD-3-Clause).
 #
 # Mirrors hermes-agent's built-in `memory` tool entries (MEMORY.md / USER.md
 # in tools/memory_tool.py) into a single Postgres table, adds 384-dim
@@ -14,16 +14,16 @@
 # built-in `memory` tool a durable Postgres backing + semantic search,
 # nothing more. Honcho went heavy and exploded; this stays lean.
 #
-# v0.4.0 (memory-pgvector fork) — embeddings are produced locally by
-# sentence-transformers all-MiniLM-L6-v2 (see pgvector.embedder) by
+# v0.4.0 (hexus fork) — embeddings are produced locally by
+# sentence-transformers all-MiniLM-L6-v2 (see hexus.embedder) by
 # default. The HTTP-embed path from upstream is preserved as a fallback
 # for operators with an existing Ollama / OpenAI-compatible endpoint
 # (configure `embed_url` in plugin config to use it).
 #
-# Config in $HERMES_HOME/config.yaml under plugins.pgvector:
+# Config in $HERMES_HOME/config.yaml under plugins.hexus:
 #
 #     plugins:
-#       pgvector:
+#       hexus:
 #         dsn:         "dbname=hermes_memory user=hermes host=/var/run/postgresql"
 #         # No embed_url → use the local sentence-transformers model
 #         embed_url:   null
@@ -172,7 +172,7 @@ RECALL_MEMORY_SCHEMA = {
 DEFAULTS = {
     "dsn": "dbname=hermes_memory user=hermes host=/var/run/postgresql connect_timeout=5",
     # embed_url=None means "use the local sentence-transformers model"
-    # (see pgvector.embedder.LocalBertEmbedder). Set to an HTTP URL
+    # (see hexus.embedder.LocalBertEmbedder). Set to an HTTP URL
     # (e.g. "http://ollama:11434") to fall back to the OpenAI-compatible
     # /v1/embeddings + Ollama-native /api/embed dispatch in embed.py.
     "embed_url": None,
@@ -216,7 +216,7 @@ def _load_plugin_config() -> dict:
             data = yaml.safe_load(fh) or {}
         if cfg_get is None:
             return {}
-        expanded = _expand_config_vars(cfg_get(data, "plugins", "pgvector", default={}) or {})
+        expanded = _expand_config_vars(cfg_get(data, "plugins", "hexus", default={}) or {})
         return expanded if isinstance(expanded, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
@@ -266,13 +266,13 @@ def _expand_env_match(match: re.Match[str]) -> str:
 # Provider
 # ---------------------------------------------------------------------------
 
-class PgvectorMemoryProvider(MemoryProvider or object):
+class HexusMemoryProvider(MemoryProvider or object):
     """Postgres mirror of built-in memory entries, with semantic recall."""
 
     def __init__(self, config: dict | None = None):
         if MemoryProvider is None:
             raise RuntimeError(
-                "PgvectorMemoryProvider requires Hermes Agent internals; "
+                "HexusMemoryProvider requires Hermes Agent internals; "
                 "install this package inside Hermes Agent to use the provider."
             )
         self._config = {**DEFAULTS, **(config or {})}
@@ -285,7 +285,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
 
     @property
     def name(self) -> str:
-        return "pgvector"
+        return "hexus"
 
     # -- Lifecycle -----------------------------------------------------------
 
@@ -343,12 +343,12 @@ class PgvectorMemoryProvider(MemoryProvider or object):
             health = self._store.health()
             self._healthy = bool(health.get("ok"))
             if not self._healthy:
-                logger.warning("pgvector unhealthy on init: %s", health.get("error"))
+                logger.warning("hexus unhealthy on init: %s", health.get("error"))
         except MemoryStore.SchemaNotApplied as exc:
-            logger.error("pgvector schema not applied — %s", exc)
+            logger.error("hexus schema not applied — %s", exc)
             self._healthy = False
         except Exception as exc:  # noqa: BLE001
-            logger.warning("pgvector init failed: %s", exc)
+            logger.warning("hexus init failed: %s", exc)
             self._healthy = False
 
         # Background writer — bounded queue, lazy thread start. Decouples
@@ -370,7 +370,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
                     model_name=self._config.get("embed_model") or DEFAULT_MODEL
                 ).ensure_loaded()
             except Exception as exc:  # noqa: BLE001
-                logger.warning("pgvector eager embed load failed: %s", exc)
+                logger.warning("hexus eager embed load failed: %s", exc)
 
         # v0.1.1: bulk import existing MEMORY.md / USER.md content so the
         # plugin sees pre-plugin entries + direct file edits, not just the
@@ -404,13 +404,13 @@ class PgvectorMemoryProvider(MemoryProvider or object):
             count_scoped = count_all = 0
         if count_all == 0:
             return (
-                "# pgvector memory\n"
+                "# hexus memory\n"
                 "Active. Empty store. Use the built-in `memory` tool to save "
                 "durable notes — entries are mirrored to Postgres with "
                 "embeddings for semantic recall across sessions."
             )
         return (
-            "# pgvector memory\n"
+            "# hexus memory\n"
             f"Active. {count_scoped} entries for '{self._agent_identity}', "
             f"{count_all} total across all themes. "
             "Use `recall_memory(query, scope='all'|'<theme>')` for deeper / "
@@ -427,7 +427,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
                 model=self._config["embed_model"],
             )
         except EmbeddingError as exc:
-            logger.debug("pgvector prefetch embed failed: %s", exc)
+            logger.debug("hexus prefetch embed failed: %s", exc)
             return ""
 
         # Ambient prefetch is scoped to the current agent_identity by
@@ -440,12 +440,12 @@ class PgvectorMemoryProvider(MemoryProvider or object):
                 min_similarity=float(self._config.get("min_similarity", 0.30)),
             )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("pgvector prefetch query failed: %s", exc)
+            logger.debug("hexus prefetch query failed: %s", exc)
             return ""
         if not rows:
             return ""
 
-        lines = [f"## Recall (pgvector, {self._agent_identity})"]
+        lines = [f"## Recall (hexus, {self._agent_identity})"]
         for r in rows:
             score = r.get("score") or 0.0
             tgt = r.get("target") or "?"
@@ -523,10 +523,10 @@ class PgvectorMemoryProvider(MemoryProvider or object):
         if not self._healthy or not self._writer:
             return
         if target not in ("memory", "user"):
-            logger.debug("pgvector ignoring unsupported target: %r", target)
+            logger.debug("hexus ignoring unsupported target: %r", target)
             return
         if action not in ("add", "replace", "remove"):
-            logger.debug("pgvector ignoring unknown action: %r", action)
+            logger.debug("hexus ignoring unknown action: %r", action)
             return
 
         meta = dict(metadata or {})
@@ -612,7 +612,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug(
-                "pgvector worker (%s/%s/%s) failed: %s",
+                "hexus worker (%s/%s/%s) failed: %s",
                 item.action,
                 item.agent_identity,
                 item.target,
@@ -652,14 +652,14 @@ class PgvectorMemoryProvider(MemoryProvider or object):
                 )
                 if result.get("inserted"):
                     logger.info(
-                        "pgvector bulk-sync %s: parsed=%d inserted=%d skipped=%d",
+                        "hexus bulk-sync %s: parsed=%d inserted=%d skipped=%d",
                         fname,
                         result.get("parsed", 0),
                         result.get("inserted", 0),
                         result.get("skipped", 0),
                     )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("pgvector bulk-sync %s failed: %s", fname, exc)
+                logger.warning("hexus bulk-sync %s failed: %s", fname, exc)
 
     def _make_embed_fn(self):
         """Return a closure over the configured embed endpoint, or None."""
@@ -682,7 +682,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
         if tool_name != "recall_memory":
             return tool_error(f"Unknown tool: {tool_name}")
         if not self._healthy or not self._store:
-            return json.dumps({"results": [], "count": 0, "error": "pgvector unavailable"})
+            return json.dumps({"results": [], "count": 0, "error": "hexus unavailable"})
 
         query = (args.get("query") or "").strip()
         if not query:
@@ -746,7 +746,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
     def _handle_recall_conversation(self, args: Dict[str, Any]) -> str:
         """Tool handler for recall_conversation over the conversations table."""
         if not self._healthy or not self._store:
-            return json.dumps({"results": [], "count": 0, "error": "pgvector unavailable"})
+            return json.dumps({"results": [], "count": 0, "error": "hexus unavailable"})
 
         query = (args.get("query") or "").strip()
         if not query:
@@ -880,11 +880,11 @@ class PgvectorMemoryProvider(MemoryProvider or object):
                 with open(config_path, encoding="utf-8-sig") as fh:
                     existing = yaml.safe_load(fh) or {}
             existing.setdefault("plugins", {})
-            existing["plugins"]["pgvector"] = values
+            existing["plugins"]["hexus"] = values
             with open(config_path, "w", encoding="utf-8") as fh:
                 yaml.dump(existing, fh, default_flow_style=False)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("pgvector save_config failed: %s", exc)
+            logger.warning("hexus save_config failed: %s", exc)
 
     # -- Helpers -------------------------------------------------------------
 
@@ -899,7 +899,7 @@ class PgvectorMemoryProvider(MemoryProvider or object):
             )
         except EmbeddingError as exc:
             if not self._embed_warned:
-                logger.warning("pgvector embed failed (degrading to text-only): %s", exc)
+                logger.warning("hexus embed failed (degrading to text-only): %s", exc)
                 self._embed_warned = True
             return None
 
@@ -909,6 +909,6 @@ class PgvectorMemoryProvider(MemoryProvider or object):
 # ---------------------------------------------------------------------------
 
 def register(ctx) -> None:
-    """Register the pgvector memory provider with the plugin system."""
-    provider = PgvectorMemoryProvider(config=_load_plugin_config())
+    """Register the hexus memory provider with the plugin system."""
+    provider = HexusMemoryProvider(config=_load_plugin_config())
     ctx.register_memory_provider(provider)

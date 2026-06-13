@@ -1,4 +1,4 @@
-# docker/compose.yml — memory-pgvector dev/test/mcp stack
+# docker/compose.yml — hexus dev/test/mcp stack
 #
 # Profiles:
 #   test → CI + local one-shot test runs (pg + test container)
@@ -6,14 +6,14 @@
 #   mcp  → pg + long-lived MCP server (stdio inside the container;
 #          operators expose it to editors/agents via their own bridge)
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause)
+# Forked from andreab67/hermes-hexus (BSD-3-Clause)
 
-name: memory-pgvector
+name: hexus
 
 services:
   pg:
     image: pgvector/pgvector:pg16
-    container_name: memory-pgvector-pg
+    container_name: hexus-pg
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -41,8 +41,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: runtime
-    image: memory-pgvector:test
-    container_name: memory-pgvector-test
+    image: hexus:test
+    container_name: hexus-test
     profiles: ["test"]
     depends_on:
       pg:
@@ -55,7 +55,7 @@ services:
       PG_TEST_DSN: "dbname=hermes_test user=postgres password=postgres host=pg"
     # PG_TEST_EMBED_URL is intentionally unset → live embed test skips (Phase 0)
 
-  # Long-lived MCP server. `memory-pgvector-mcp serve --transport http`
+  # Long-lived MCP server. `hexus-mcp serve --transport http`
   # binds 0.0.0.0:8000 inside the container; the host port mapping is
   # commented out by default because most operators want the server on
   # an internal network only (Claude Desktop / Cursor / fleet agents
@@ -66,8 +66,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: runtime
-    image: memory-pgvector:test
-    container_name: memory-pgvector-mcp
+    image: hexus:test
+    container_name: hexus-mcp
     profiles: ["mcp"]
     depends_on:
       pg:
@@ -75,20 +75,20 @@ services:
     environment:
       CMD_PROFILE: mcp
       PYTHONPATH: /app            # the COPY'd source dirs (pgvector, mcp_server) live here
-      MEMORY_PGVECTOR_TRANSPORT: http
-      MEMORY_PGVECTOR_DSN: "dbname=hermes_test user=postgres password=postgres host=pg"
+      HEXUS_TRANSPORT: http
+      HEXUS_DSN: "dbname=hermes_test user=postgres password=postgres host=pg"
       # Default agent_identity for tool calls that don't supply one.
-      # Override per-launch by setting MEMORY_PGVECTOR_AGENT_IDENTITY
+      # Override per-launch by setting HEXUS_AGENT_IDENTITY
       # in this env or in the operator's compose override.
-      MEMORY_PGVECTOR_AGENT_IDENTITY: "default"
+      HEXUS_AGENT_IDENTITY: "default"
       # Eager-load the BERT model at startup (saves ~1-2s on first
       # tool call). Set to "0" for lazy (default).
-      MEMORY_PGVECTOR_EMBED_EAGER_LOAD: "0"
+      HEXUS_EMBED_EAGER_LOAD: "0"
       HF_HUB_OFFLINE: "1"
     expose:
       - "8000"   # streamable-http MCP endpoint, host-port via proxy
     healthcheck:
-      test: ["CMD", "memory-pgvector-mcp", "doctor", "--dsn", "dbname=hermes_test user=postgres password=postgres host=pg"]
+      test: ["CMD", "hexus-mcp", "doctor", "--dsn", "dbname=hermes_test user=postgres password=postgres host=pg"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -96,4 +96,4 @@ services:
 
 volumes:
   pg_data:
-    name: memory-pgvector-pg-data
+    name: hexus-pg-data

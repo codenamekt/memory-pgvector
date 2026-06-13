@@ -21,7 +21,7 @@ import pytest
 
 
 MIGRATION_PATH = (
-    Path(__file__).resolve().parent.parent / "pgvector" / "migrations" / "001_schema.sql"
+    Path(__file__).resolve().parent.parent / "hexus" / "migrations" / "001_schema.sql"
 )
 
 

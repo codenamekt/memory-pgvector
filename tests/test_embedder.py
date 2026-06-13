@@ -1,4 +1,4 @@
-"""tests/test_embedder.py — comprehensive tests for pgvector.embedder.
+"""tests/test_embedder.py — comprehensive tests for hexus.embedder.
 
 Two layers:
   1. Pure-Python / structural tests (no model load) — fast, run always.
@@ -29,7 +29,7 @@ import pytest
 def test_constants():
     """The public constants are pinned to the values the rest of the
     code (and the schema migration) assume."""
-    from pgvector.embedder import DEFAULT_MODEL, DEFAULT_DIM
+    from hexus.embedder import DEFAULT_MODEL, DEFAULT_DIM
     assert DEFAULT_MODEL == "sentence-transformers/all-MiniLM-L6-v2"
     assert DEFAULT_DIM == 384
 
@@ -41,7 +41,7 @@ def test_embedder_import_is_fast():
     This guards against an accidental eager load in __init__ that would
     slow down plugin import (and break hermes-agent's startup time).
     """
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
     e = LocalBertEmbedder()
     assert e.is_loaded is False
     assert e.dim == 384  # constant, not from loaded model
@@ -50,7 +50,7 @@ def test_embedder_import_is_fast():
 def test_embedder_custom_model_constant_dim():
     """For a non-default model, dim returns 0 until loaded (we don't
     know the dim ahead of time)."""
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
     e = LocalBertEmbedder(model_name="some/custom-model")
     assert e.dim == 0
     assert e.is_loaded is False
@@ -58,7 +58,7 @@ def test_embedder_custom_model_constant_dim():
 
 def test_embed_empty_list_returns_empty():
     """Passing an empty list returns an empty list (no model load)."""
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
     e = LocalBertEmbedder()
     assert e.embed([]) == []
     # Still not loaded — empty input doesn't trigger load.
@@ -67,7 +67,7 @@ def test_embed_empty_list_returns_empty():
 
 def test_embed_filters_whitespace_only():
     """All-whitespace input filters to empty, returns empty. No model load."""
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
     e = LocalBertEmbedder()
     assert e.embed(["", "   ", "\n\t  "]) == []
     assert e.is_loaded is False
@@ -75,7 +75,7 @@ def test_embed_filters_whitespace_only():
 
 def test_embed_disables_sentence_transformers_progress_bar():
     """Hermes owns progress reporting; the embedder must not print tqdm bars."""
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
 
     class ArrayLike:
         def tolist(self):
@@ -100,7 +100,7 @@ def test_embed_disables_sentence_transformers_progress_bar():
 
 def test_singleton_returns_same_instance():
     """get_default_embedder is process-wide — same args → same instance."""
-    from pgvector.embedder import get_default_embedder, reset_default_embedder
+    from hexus.embedder import get_default_embedder, reset_default_embedder
     reset_default_embedder()
     e1 = get_default_embedder()
     e2 = get_default_embedder()
@@ -111,7 +111,7 @@ def test_singleton_returns_same_instance():
 def test_singleton_caches_by_model_name():
     """Different model_name → different singleton. (Mostly relevant for
     tests; production uses one model.)"""
-    from pgvector.embedder import get_default_embedder, reset_default_embedder
+    from hexus.embedder import get_default_embedder, reset_default_embedder
     reset_default_embedder()
     e_a = get_default_embedder(model_name="model-a")
     e_b = get_default_embedder(model_name="model-b")
@@ -124,7 +124,7 @@ def test_singleton_caches_by_model_name():
 
 def test_singleton_is_thread_safe():
     """Concurrent get_default_embedder() calls converge on a single instance."""
-    from pgvector.embedder import get_default_embedder, reset_default_embedder
+    from hexus.embedder import get_default_embedder, reset_default_embedder
     reset_default_embedder()
     instances: List = []
     barrier = threading.Barrier(8)
@@ -147,7 +147,7 @@ def test_reset_drops_singleton():
     """reset_default_embedder() forces the next get_default_embedder()
     call to construct a fresh instance. Test-only helper, but the
     contract is documented for downstream callers."""
-    from pgvector.embedder import get_default_embedder, reset_default_embedder
+    from hexus.embedder import get_default_embedder, reset_default_embedder
     e1 = get_default_embedder()
     reset_default_embedder()
     e2 = get_default_embedder()
@@ -166,7 +166,7 @@ def test_reset_drops_singleton():
 def embedder():
     if os.environ.get("SENTENCE_TRANSFORMERS_SKIP_REAL") == "1":
         pytest.skip("SENTENCE_TRANSFORMERS_SKIP_REAL=1")
-    from pgvector.embedder import LocalBertEmbedder
+    from hexus.embedder import LocalBertEmbedder
     e = LocalBertEmbedder()
     e.ensure_loaded()
     yield e
@@ -247,7 +247,7 @@ def test_embed_filters_empty_in_batch(embedder):
 
 def test_embed_no_base_url_uses_local(monkeypatch):
     """embed() with no base_url dispatches to the local embedder."""
-    from pgvector import embed as embed_fn
+    from hexus import embed as embed_fn
 
     class FakeEmbedder:
         def __init__(self):
@@ -257,7 +257,7 @@ def test_embed_no_base_url_uses_local(monkeypatch):
             return [[0.1] * 384]
 
     fake = FakeEmbedder()
-    monkeypatch.setattr("pgvector.embedder.get_default_embedder", lambda **kw: fake)
+    monkeypatch.setattr("hexus.embedder.get_default_embedder", lambda **kw: fake)
 
     vec = embed_fn("hello", base_url=None, model="some/model")
     assert vec == [0.1] * 384
@@ -266,7 +266,7 @@ def test_embed_no_base_url_uses_local(monkeypatch):
 
 def test_embed_no_base_url_default_model(monkeypatch):
     """embed() with no base_url and no model uses DEFAULT_MODEL."""
-    from pgvector import embed as embed_fn
+    from hexus import embed as embed_fn
 
     captured = {}
     class FakeEmbedder:
@@ -278,15 +278,15 @@ def test_embed_no_base_url_default_model(monkeypatch):
         captured["model_name"] = model_name
         return FakeEmbedder()
 
-    monkeypatch.setattr("pgvector.embedder.get_default_embedder", fake_getter)
+    monkeypatch.setattr("hexus.embedder.get_default_embedder", fake_getter)
     embed_fn("hello")
-    from pgvector.embedder import DEFAULT_MODEL
+    from hexus.embedder import DEFAULT_MODEL
     assert captured["model_name"] == DEFAULT_MODEL
 
 
 def test_embed_base_url_dispatches_to_http(monkeypatch):
     """embed() with a base_url goes through the HTTP path, not local."""
-    from pgvector import embed as embed_fn
+    from hexus import embed as embed_fn
 
     # Spy: if the local embedder is called, the test fails.
     local_called = {"value": False}
@@ -295,7 +295,7 @@ def test_embed_base_url_dispatches_to_http(monkeypatch):
             local_called["value"] = True
             return [[0.0] * 384]
 
-    monkeypatch.setattr("pgvector.embedder.get_default_embedder", lambda **kw: SpyLocal())
+    monkeypatch.setattr("hexus.embedder.get_default_embedder", lambda **kw: SpyLocal())
 
     # Patch urllib.request.urlopen to return a fake 384-dim embedding.
     class FakeResp:
@@ -320,8 +320,8 @@ def test_embed_truncates_long_text():
     """Text longer than MAX_INPUT_CHARS is silently truncated (the
     embedder would truncate anyway, but doing it here keeps log lines
     sane and avoids the model choking on a 100KB string)."""
-    from pgvector import embed as embed_fn
-    from pgvector.embed import MAX_INPUT_CHARS
+    from hexus import embed as embed_fn
+    from hexus.embed import MAX_INPUT_CHARS
 
     captured = {}
     class FakeEmbedder:
@@ -329,7 +329,7 @@ def test_embed_truncates_long_text():
             captured["lengths"] = [len(t) for t in texts]
             return [[0.0] * 384]
 
-    with patch("pgvector.embedder.get_default_embedder", lambda **kw: FakeEmbedder()):
+    with patch("hexus.embedder.get_default_embedder", lambda **kw: FakeEmbedder()):
         huge = "x" * (MAX_INPUT_CHARS + 500)
         embed_fn(huge)
 
@@ -339,8 +339,8 @@ def test_embed_truncates_long_text():
 def test_embed_http_404_raises_embedding_error():
     """The HTTP path raises EmbeddingError on a non-2xx response, not
     a urllib.error.HTTPError leaking out."""
-    from pgvector import embed as embed_fn
-    from pgvector.embed import EmbeddingError
+    from hexus import embed as embed_fn
+    from hexus.embed import EmbeddingError
     import urllib.error
 
     with patch("urllib.request.urlopen") as urlopen:

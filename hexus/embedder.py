@@ -1,6 +1,6 @@
-"""embedder.py — local sentence-transformers embedder for the pgvector memory plugin.
+"""embedder.py — local sentence-transformers embedder for the hexus memory plugin.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+# Forked from andreab67/hermes-hexus (BSD-3-Clause).
 #
 # Replaces the upstream HTTP embedder with a local MiniLM-L6-v2 model
 # loaded once at first use. Produces 384-dim vectors. The whole model
@@ -233,7 +233,7 @@ def get_default_embedder(
     """
     global _singletons
     if device is None:
-        device = os.environ.get("MEMORY_PGVECTOR_EMBED_DEVICE", "cpu")
+        device = os.environ.get("HEXUS_EMBED_DEVICE", "cpu")
     key = (model_name, cache_dir, device)
     with _singleton_lock:
         existing = _singletons.get(key)

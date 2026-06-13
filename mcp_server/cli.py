@@ -1,12 +1,12 @@
-"""mcp_server.cli — `memory-pgvector-mcp` console script entry point.
+"""mcp_server.cli — `hexus-mcp` console script entry point.
 
-Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+Forked from andreab67/hermes-hexus (BSD-3-Clause).
 
 Usage:
-  memory-pgvector-mcp serve --transport stdio --dsn "dbname=... user=... host=..."
-  memory-pgvector-mcp serve --transport http  --host 0.0.0.0 --port 8000 \\
+  hexus-mcp serve --transport stdio --dsn "dbname=... user=... host=..."
+  hexus-mcp serve --transport http  --host 0.0.0.0 --port 8000 \\
       --dsn "..." --agent-identity intraday-trading
-  memory-pgvector-mcp doctor --dsn "..."        # one-shot health check + exit
+  hexus-mcp doctor --dsn "..."        # one-shot health check + exit
 
 The serve command blocks. The doctor command is for ops smoke-testing
 ("did the schema apply, is the embedder reachable, how many rows") and
@@ -29,23 +29,23 @@ logger = logging.getLogger("mcp_server")
 def _add_common_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--dsn",
-        default=os.environ.get("MEMORY_PGVECTOR_DSN", ""),
+        default=os.environ.get("HEXUS_DSN", ""),
         help=(
             "Postgres DSN. e.g. 'dbname=hermes_memory user=hermes host=/var/run/postgresql'. "
-            "Defaults to env MEMORY_PGVECTOR_DSN. Required for serve."
+            "Defaults to env HEXUS_DSN. Required for serve."
         ),
     )
     p.add_argument(
         "--agent-identity",
-        default=os.environ.get("MEMORY_PGVECTOR_AGENT_IDENTITY", ""),
+        default=os.environ.get("HEXUS_AGENT_IDENTITY", ""),
         help=(
             "Default agent_identity for tool calls that don't supply one. "
-            "Defaults to env MEMORY_PGVECTOR_AGENT_IDENTITY, then 'default'."
+            "Defaults to env HEXUS_AGENT_IDENTITY, then 'default'."
         ),
     )
     p.add_argument(
         "--log-level",
-        default=os.environ.get("MEMORY_PGVECTOR_LOG_LEVEL", "INFO"),
+        default=os.environ.get("HEXUS_LOG_LEVEL", "INFO"),
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
     )
 
@@ -61,7 +61,7 @@ def _configure_logging(level: str) -> None:
 def cmd_serve(args: argparse.Namespace) -> int:
     if not args.dsn:
         print(
-            "ERROR: --dsn is required (or set MEMORY_PGVECTOR_DSN env var).",
+            "ERROR: --dsn is required (or set HEXUS_DSN env var).",
             file=sys.stderr,
         )
         return 2
@@ -69,21 +69,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if args.agent_identity:
         # Set the default for the whole process. Tools read this on each
         # call that doesn't pass an explicit agent_identity.
-        os.environ["MEMORY_PGVECTOR_AGENT_IDENTITY"] = args.agent_identity
+        os.environ["HEXUS_AGENT_IDENTITY"] = args.agent_identity
 
     _configure_logging(args.log_level)
     logger.info(
-        "starting memory-pgvector-mcp transport=%s agent=%r dsn=%s",
+        "starting hexus-mcp transport=%s agent=%r dsn=%s",
         args.transport,
         args.agent_identity or "<default>",
         _redact_dsn(args.dsn),
     )
 
-    # Imported lazily so `memory-pgvector-mcp --help` works without
+    # Imported lazily so `hexus-mcp --help` works without
     # the [mcp] extra installed.
     from .server import build_server
 
-    mcp = build_server(args.dsn, name="memory-pgvector")
+    mcp = build_server(args.dsn, name="hexus")
 
     if args.transport == "stdio":
         # FastMCP's run('stdio') uses sys.stdin / sys.stdout, which is
@@ -115,12 +115,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     """
     if not args.dsn:
         print(
-            "ERROR: --dsn is required (or set MEMORY_PGVECTOR_DSN env var).",
+            "ERROR: --dsn is required (or set HEXUS_DSN env var).",
             file=sys.stderr,
         )
         return 2
 
-    from pgvector.store import MemoryStore
+    from hexus.store import MemoryStore
     from . import tools
 
     _configure_logging(args.log_level)
@@ -143,10 +143,10 @@ def _redact_dsn(dsn: str) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="memory-pgvector-mcp",
+        prog="hexus-mcp",
         description=(
-            "memory-pgvector MCP server. Exposes the same Postgres + "
-            "pgvector memory store the hermes-agent plugin uses to any "
+            "hexus MCP server. Exposes the same Postgres + "
+            "hexus memory store the hermes-agent plugin uses to any "
             "MCP client. Multi-agent: each connected client picks an "
             "agent_identity (CLI flag or per-call argument) and shares "
             "the same process / model load with every other client."
@@ -158,7 +158,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _add_common_args(p_serve)
     p_serve.add_argument(
         "--transport",
-        default=os.environ.get("MEMORY_PGVECTOR_TRANSPORT", "stdio"),
+        default=os.environ.get("HEXUS_TRANSPORT", "stdio"),
         choices=("stdio", "http"),
         help=(
             "MCP transport. 'stdio' (default) is for editor integration "

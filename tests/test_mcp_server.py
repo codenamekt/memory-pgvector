@@ -1,6 +1,6 @@
 """tests/test_mcp_server.py — tests for the MCP tool surface.
 
-Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+Forked from andreab67/hermes-hexus (BSD-3-Clause).
 
 Two layers:
   1. **Tool-function tests** — exercise each pure function in
@@ -59,7 +59,7 @@ def store():
     it (`store._test_agent`) so retain/recall don't see other tests' rows.
     Cleans up its own rows on teardown.
     """
-    from pgvector.store import MemoryStore
+    from hexus.store import MemoryStore
 
     dsn = os.environ["PG_TEST_DSN"]
     s = MemoryStore(dsn)
@@ -97,9 +97,9 @@ def test_default_agent_identity_resolution(monkeypatch):
     """`default_agent_identity()` reads env, falls back to 'default'."""
     from mcp_server import tools
 
-    monkeypatch.delenv("MEMORY_PGVECTOR_AGENT_IDENTITY", raising=False)
+    monkeypatch.delenv("HEXUS_AGENT_IDENTITY", raising=False)
     assert tools.default_agent_identity() == "default"
-    monkeypatch.setenv("MEMORY_PGVECTOR_AGENT_IDENTITY", "intraday-trading")
+    monkeypatch.setenv("HEXUS_AGENT_IDENTITY", "intraday-trading")
     assert tools.default_agent_identity() == "intraday-trading"
 
 
@@ -176,7 +176,7 @@ def test_empty_string_target_defaults_to_both_stores(store):
     tools.memory_retain(
         store,
         {
-            "contents": ["Postgres + pgvector is great for semantic search."],
+            "contents": ["Postgres + hexus is great for semantic search."],
             "target": "memory",
             "agent_identity": agent_of(store),  # noqa: SLF001
         },
@@ -185,14 +185,14 @@ def test_empty_string_target_defaults_to_both_stores(store):
     out = tools.memory_recall(
         store,
         {
-            "query": "pgvector semantic search",
+            "query": "hexus semantic search",
             "top_k": 3,
             "agent_identity": agent_of(store),  # noqa: SLF001
             "target": "",
         },
     )
     assert out["count"] == 1
-    assert "pgvector" in out["results"][0]["content"]
+    assert "hexus" in out["results"][0]["content"]
 
     count = tools.memory_count(
         store,
@@ -210,7 +210,7 @@ def test_memory_recall_round_trip(store):
     from mcp_server import tools
 
     docs = [
-        "Postgres + pgvector is great for semantic search.",
+        "Postgres + hexus is great for semantic search.",
         "The weather in Austin is warm in June.",
         "Sentence-transformers provides local BERT embeddings.",
     ]
@@ -225,14 +225,14 @@ def test_memory_recall_round_trip(store):
     out = tools.memory_recall(
         store,
         {
-            "query": "what does pgvector do",
+            "query": "what does hexus do",
             "top_k": 3,
             "agent_identity": agent_of(store),  # noqa: SLF001
         },
     )
     assert out["count"] == 3
-    # The first hit should be the pgvector doc.
-    assert "pgvector" in out["results"][0]["content"]
+    # The first hit should be the hexus doc.
+    assert "hexus" in out["results"][0]["content"]
     # All results carry a score in [0, 1]. Note: cosine distance can be
     # slightly > 1 for unnormalized vectors, making 1 - distance slightly
     # negative. We clamp at a small negative tolerance.
@@ -338,6 +338,21 @@ def test_memory_search_browse(store):
     for r in out["rows"]:
         assert "embedding" not in r
 
+    # Test pagination / offset
+    out_page2 = tools.memory_search(
+        store,
+        {
+            "agent_identity": agent_of(store),  # noqa: SLF001
+            "limit": 2,
+            "offset": 3,
+        },
+    )
+    assert out_page2["count"] == 2
+    assert out_page2["limit"] == 2
+    assert out_page2["offset"] == 3
+    contents = [r["content"] for r in out_page2["rows"]]
+    assert contents == ["row 1", "row 0"]
+
 
 def test_memory_forget_dry_run_by_default(store):
     from mcp_server import tools
@@ -418,7 +433,7 @@ def test_memory_append_turn_and_recall_turns(store):
         {
             "session_id": "sess-abc",
             "role": "assistant",
-            "content": "Glad to hear! pgvector is a great fit.",
+            "content": "Glad to hear! hexus is a great fit.",
             "agent_identity": agent_of(store),  # noqa: SLF001
         },
     )
@@ -540,7 +555,7 @@ class TestMcpWiring:
 
     def _server(self, store):
         from mcp_server.server import _build_server
-        return _build_server(store, name="memory-pgvector-test")
+        return _build_server(store, name="hexus-test")
 
     def _get_tool_cache(self, mcp):
         """FastMCP wraps a Server internally; tools are cached there.

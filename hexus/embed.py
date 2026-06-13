@@ -1,10 +1,10 @@
-"""embed.py — embedding client for the pgvector memory plugin.
+"""embed.py — embedding client for the hexus memory plugin.
 #
-# Forked from andreab67/hermes-memory-pgvector (BSD-3-Clause).
+# Forked from andreab67/hermes-hexus (BSD-3-Clause).
 #
 # Originally a module-level `embed(text, *, base_url, model)` that posted
 # to an OpenAI-compatible /v1/embeddings or Ollama /api/embed endpoint
-# and returned a 768-dim vector. In the memory-pgvector fork that HTTP
+# and returned a 768-dim vector. In the hexus fork that HTTP
 # path is preserved as the fallback; the default is now the local
 # sentence-transformers MiniLM-L6-v2 model loaded by LocalBertEmbedder
 # (see embedder.py), which produces 384-dim vectors.
@@ -147,8 +147,8 @@ def _post(url: str, body: dict, *, timeout: float, expected_dim: int, extract) -
     return vec
 
 
-def to_pgvector_literal(vec: List[float]) -> str:
-    """Render a Python list of floats as a pgvector input literal.
+def to_hexus_literal(vec: List[float]) -> str:
+    """Render a Python list of floats as a hexus input literal.
 
     psycopg can also handle this via type adapters, but the literal form
     keeps the plugin dependency-light.
