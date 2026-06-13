@@ -445,3 +445,46 @@ def test_search_turns_with_decay_and_boost(store_with_turn_cleanup):
             meta = cur.fetchone()[0] or {}
             assert int(meta.get("recall_count", 0)) == 1
 
+
+def test_cleanup_stale_records(store_with_turn_cleanup):
+    s, agent = store_with_turn_cleanup
+    vec = [0.1] * 384
+    id_old_conv = s.append_turn(session_id="sess-1", agent_identity=agent, role="user", content="old turn", embedding=vec)
+    id_new_conv = s.append_turn(session_id="sess-1", agent_identity=agent, role="user", content="new turn", embedding=vec)
+    
+    # Backdate old turn by 10 days
+    import psycopg
+    from datetime import datetime, timedelta, timezone
+    old_time = datetime.now(timezone.utc) - timedelta(days=10)
+    with psycopg.connect(s._dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE conversations SET ts = %s WHERE id = %s", (old_time, id_old_conv))
+            conn.commit()
+            
+    # Clean up records older than 5 days
+    res = s.cleanup_stale_records(conversations_ttl_days=5)
+    assert res["conversations"] == 1
+    
+    with psycopg.connect(s._dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM conversations WHERE agent_identity = %s", (agent,))
+            remaining = [r[0] for r in cur.fetchall()]
+            assert id_old_conv not in remaining
+            assert id_new_conv in remaining
+
+
+def test_search_with_platform_filter(store):
+    s, agent = store
+    vec = [0.1] * 384
+    s.add(agent_identity=agent, target="memory", content="cli note", embedding=vec, metadata={"platform": "cli"})
+    s.add(agent_identity=agent, target="memory", content="telegram note", embedding=vec, metadata={"platform": "telegram"})
+    
+    cli_rows = s.search(query_embedding=vec, agent_identity=agent, platform="cli")
+    assert len(cli_rows) == 1
+    assert cli_rows[0]["content"] == "cli note"
+    
+    tg_rows = s.search(query_embedding=vec, agent_identity=agent, platform="telegram")
+    assert len(tg_rows) == 1
+    assert tg_rows[0]["content"] == "telegram note"
+
+

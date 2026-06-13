@@ -689,7 +689,7 @@ class TestMcpWiring:
         mcp = self._server(store)
         cache = self._get_tool_cache(mcp)
         names = set(cache.keys())
-        # The ten tools the server is supposed to expose.
+        # The tools the server is supposed to expose.
         assert {
             "memory_health",
             "memory_retain",
@@ -703,6 +703,8 @@ class TestMcpWiring:
             "memory_hybrid_recall_turns",
             "memory_record_delegation",
             "memory_recall_delegations",
+            "memory_cleanup",
+            "memory_metrics",
         }.issubset(names), f"missing tools: {names}"
 
     def test_every_tool_has_description_and_input_schema(self, store):

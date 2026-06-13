@@ -69,6 +69,7 @@ class AsyncWriter:
         self._dropped = 0
         self._dropped_warned = False
         self._lock = threading.Lock()
+        self._latencies: List[float] = []
 
     # -- Public API ----------------------------------------------------------
 
@@ -124,11 +125,21 @@ class AsyncWriter:
             logger.warning("hexus writer thread did not drain within %.1fs", timeout)
 
     def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            lats = list(self._latencies)
+        p50 = float("nan")
+        p95 = float("nan")
+        if lats:
+            sorted_lats = sorted(lats)
+            p50 = sorted_lats[int(len(sorted_lats) * 0.5)]
+            p95 = sorted_lats[int(len(sorted_lats) * 0.95)]
         return {
             "queue_size": self._queue.qsize(),
             "queue_max": self._queue.maxsize,
             "dropped_total": self._dropped,
             "thread_alive": bool(self._thread and self._thread.is_alive()),
+            "p50_latency_sec": p50,
+            "p95_latency_sec": p95,
         }
 
     # -- Internals -----------------------------------------------------------
@@ -146,6 +157,7 @@ class AsyncWriter:
             self._thread.start()
 
     def _run(self) -> None:
+        import time
         while not self._stop.is_set():
             try:
                 item = self._queue.get(timeout=0.5)
@@ -155,7 +167,13 @@ class AsyncWriter:
                 self._queue.task_done()
                 break
             try:
+                t0 = time.perf_counter()
                 self._worker_fn(item)
+                duration = time.perf_counter() - t0
+                with self._lock:
+                    self._latencies.append(duration)
+                    if len(self._latencies) > 1000:
+                        self._latencies.pop(0)
             except Exception as exc:  # noqa: BLE001
                 # worker_fn is supposed to swallow its own errors. If
                 # something slipped through, log and keep going — never

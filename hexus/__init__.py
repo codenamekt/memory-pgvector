@@ -312,6 +312,8 @@ class HexusMemoryProvider(MemoryProvider or object):
         self._session_id: str = ""
         self._healthy: bool = False
         self._embed_warned: bool = False
+        self._last_md_mtimes: Dict[str, float] = {}
+        self._hermes_home: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -328,6 +330,7 @@ class HexusMemoryProvider(MemoryProvider or object):
 
     def initialize(self, session_id: str, **kwargs) -> None:
         self._session_id = session_id
+        self._hermes_home = kwargs.get("hermes_home")
         # Per-agent theme scoping — priority order:
         #   1. gateway_session_key — from the `X-Hermes-Session-Key` header on
         #      API requests. This is the EXPLICIT minion-scope signal sent by
@@ -406,7 +409,7 @@ class HexusMemoryProvider(MemoryProvider or object):
         # plugin sees pre-plugin entries + direct file edits, not just the
         # new writes captured via on_memory_write.
         if self._healthy and self._config.get("bulk_sync_on_init", True):
-            self._bulk_sync_from_disk(kwargs.get("hermes_home"))
+            self._bulk_sync_from_disk(self._hermes_home)
 
     def shutdown(self) -> None:
         # Drain the in-flight writes first so we don't drop work...
@@ -421,6 +424,37 @@ class HexusMemoryProvider(MemoryProvider or object):
 
     def on_session_switch(self, new_session_id: str, **kwargs) -> None:
         self._session_id = new_session_id
+
+    def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
+        """Called at the start of each turn. Check if memory files on disk have changed and re-sync."""
+        if self._healthy:
+            self._check_and_sync_markdown_files()
+
+    def _check_and_sync_markdown_files(self) -> None:
+        """Check modification times of MEMORY.md and USER.md on disk, and trigger sync if changed."""
+        if not self._hermes_home:
+            try:
+                from hermes_constants import get_hermes_home
+                self._hermes_home = str(get_hermes_home())
+            except Exception:
+                return
+
+        memories_dir = Path(self._hermes_home) / "memories"
+        changed = False
+        for fname in ("MEMORY.md", "USER.md"):
+            fpath = memories_dir / fname
+            if fpath.exists():
+                try:
+                    mtime = os.path.getmtime(fpath)
+                    if fname not in self._last_md_mtimes or mtime > self._last_md_mtimes[fname]:
+                        changed = True
+                        self._last_md_mtimes[fname] = mtime
+                except Exception as exc:
+                    logger.debug("hexus failed to get mtime for %s: %s", fname, exc)
+
+        if changed:
+            logger.info("hexus: detected local changes in memory markdown files, starting sync")
+            self._bulk_sync_from_disk(self._hermes_home)
 
     # -- System prompt + ambient recall --------------------------------------
 
@@ -746,13 +780,17 @@ class HexusMemoryProvider(MemoryProvider or object):
         embed_fn = self._make_embed_fn()
 
         for target, fname in (("memory", "MEMORY.md"), ("user", "USER.md")):
+            fpath = memories_dir / fname
             try:
                 result = self._store.bulk_upsert_md(
                     agent_identity=self._agent_identity,
                     target=target,
-                    file_path=memories_dir / fname,
+                    file_path=fpath,
                     embed_fn=embed_fn,
                 )
+                # Store modification time to prevent immediate re-sync
+                if fpath.exists():
+                    self._last_md_mtimes[fname] = os.path.getmtime(fpath)
                 if result.get("inserted"):
                     logger.info(
                         "hexus bulk-sync %s: parsed=%d inserted=%d skipped=%d",

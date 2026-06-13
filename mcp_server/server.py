@@ -415,6 +415,48 @@ def _build_server(
             },
         )
 
+    @mcp.tool()
+    def memory_cleanup(
+        conversations_ttl_days: Optional[int] = None,
+        memories_ttl_days: Optional[int] = None,
+        delegations_ttl_days: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Delete stale records from conversations, memory_entries, and delegations based on TTL.
+
+        Args:
+          conversations_ttl_days: delete conversations older than this many days (default None/disabled).
+          memories_ttl_days: delete memory entries older than this many days (default None/disabled).
+          delegations_ttl_days: delete delegations older than this many days (default None/disabled).
+
+        Returns: {"status": "ok", "deleted": {"conversations": N, "memory_entries": M, "delegations": K}}
+        """
+        deleted = store.cleanup_stale_records(
+            conversations_ttl_days=conversations_ttl_days,
+            memories_ttl_days=memories_ttl_days,
+            delegations_ttl_days=delegations_ttl_days,
+        )
+        return {"status": "ok", "deleted": deleted}
+
+    @mcp.tool()
+    def memory_metrics() -> str:
+        """Return operational metrics in a Prometheus-compatible format."""
+        health = store.health()
+        m_entries = store.count(agent_identity=None, target=None)
+        m_turns = store.count_turns(agent_identity=None)
+        
+        lines = [
+            "# HELP hexus_db_reachable Liveness check for the Postgres database (1=ok, 0=error)",
+            "# TYPE hexus_db_reachable gauge",
+            f"hexus_db_reachable {1 if health.get('ok') else 0}",
+            "# HELP hexus_memory_entries_total Total number of stored memory entries",
+            "# TYPE hexus_memory_entries_total counter",
+            f"hexus_memory_entries_total {m_entries}",
+            "# HELP hexus_conversation_turns_total Total number of stored conversation turns",
+            "# TYPE hexus_conversation_turns_total counter",
+            f"hexus_conversation_turns_total {m_turns}",
+        ]
+        return "\n".join(lines)
+
     return mcp
 
 

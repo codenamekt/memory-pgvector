@@ -22,7 +22,7 @@ import json
 import logging
 import math
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -281,6 +281,7 @@ class MemoryStore:
         min_similarity: float = 0.0,
         decay_half_life_days: float = 0.0,
         recall_boost_weight: float = 0.0,
+        platform: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Semantic recall via cosine distance.
 
@@ -297,6 +298,9 @@ class MemoryStore:
         if target:
             clauses.append("target = %s")
             params.append(target)
+        if platform:
+            clauses.append("metadata->>'platform' = %s")
+            params.append(platform)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
         with self._get_pool().connection() as conn:
@@ -343,12 +347,9 @@ class MemoryStore:
         min_similarity: float = 0.0,
         decay_half_life_days: float = 0.0,
         recall_boost_weight: float = 0.0,
+        platform: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Blend semantic vector search and full-text search.
-
-        Uses CTEs to fetch top matches from each, full joins them,
-        and scores via (vector_weight * semantic_score) + (text_weight * text_rank).
-        """
+        """Blend semantic vector search and full-text search."""
         if not query_text or not query_text.strip():
             rows = self.search(
                 query_embedding=query_embedding,
@@ -358,6 +359,7 @@ class MemoryStore:
                 min_similarity=min_similarity,
                 decay_half_life_days=decay_half_life_days,
                 recall_boost_weight=recall_boost_weight,
+                platform=platform,
             )
             for r in rows:
                 r["vector_score"] = r.get("vector_score", r.get("score"))
@@ -374,6 +376,9 @@ class MemoryStore:
         if target:
             clauses.append("target = %s")
             params.append(target)
+        if platform:
+            clauses.append("metadata->>'platform' = %s")
+            params.append(platform)
             
         where = ("AND " + " AND ".join(clauses)) if clauses else ""
 
@@ -558,6 +563,7 @@ class MemoryStore:
         min_similarity: float = 0.0,
         decay_half_life_days: float = 0.0,
         recall_boost_weight: float = 0.0,
+        platform: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Semantic recall over conversation turns. Same shape as `search()`."""
         vec_literal = to_hexus_literal(query_embedding)
@@ -569,6 +575,9 @@ class MemoryStore:
         if session_id:
             clauses.append("session_id = %s")
             params.append(session_id)
+        if platform:
+            clauses.append("metadata->>'platform' = %s")
+            params.append(platform)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
         with self._get_pool().connection() as conn:
@@ -614,6 +623,7 @@ class MemoryStore:
         min_similarity: float = 0.0,
         decay_half_life_days: float = 0.0,
         recall_boost_weight: float = 0.0,
+        platform: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Blend semantic vector search and full-text search over conversation turns."""
         if not query_text or not query_text.strip():
@@ -625,6 +635,7 @@ class MemoryStore:
                 min_similarity=min_similarity,
                 decay_half_life_days=decay_half_life_days,
                 recall_boost_weight=recall_boost_weight,
+                platform=platform,
             )
             for r in rows:
                 r["vector_score"] = r.get("vector_score", r.get("score"))
@@ -640,6 +651,9 @@ class MemoryStore:
         if session_id:
             clauses.append("session_id = %s")
             params.append(session_id)
+        if platform:
+            clauses.append("metadata->>'platform' = %s")
+            params.append(platform)
             
         where = ("AND " + " AND ".join(clauses)) if clauses else ""
 
@@ -745,6 +759,7 @@ class MemoryStore:
         min_similarity: float = 0.0,
         decay_half_life_days: float = 0.0,
         recall_boost_weight: float = 0.0,
+        platform: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Semantic recall over delegations."""
         vec_literal = to_hexus_literal(query_embedding)
@@ -756,6 +771,9 @@ class MemoryStore:
         if parent_session_id:
             clauses.append("parent_session_id = %s")
             params.append(parent_session_id)
+        if platform:
+            clauses.append("metadata->>'platform' = %s")
+            params.append(platform)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
         with self._get_pool().connection() as conn:
@@ -787,6 +805,32 @@ class MemoryStore:
             self.increment_recall_counts("delegations", [r["id"] for r in rows])
 
         return rows
+
+    def cleanup_stale_records(
+        self,
+        *,
+        conversations_ttl_days: Optional[int] = None,
+        memories_ttl_days: Optional[int] = None,
+        delegations_ttl_days: Optional[int] = None,
+    ) -> Dict[str, int]:
+        """Delete records older than the specified TTL. Returns counts of deleted items."""
+        deleted = {"conversations": 0, "memory_entries": 0, "delegations": 0}
+        with self._get_pool().connection() as conn:
+            with conn.cursor() as cur:
+                if conversations_ttl_days is not None and conversations_ttl_days > 0:
+                    limit_date = datetime.now(timezone.utc) - timedelta(days=conversations_ttl_days)
+                    cur.execute("DELETE FROM conversations WHERE ts < %s", (limit_date,))
+                    deleted["conversations"] = cur.rowcount
+                if memories_ttl_days is not None and memories_ttl_days > 0:
+                    limit_date = datetime.now(timezone.utc) - timedelta(days=memories_ttl_days)
+                    cur.execute("DELETE FROM memory_entries WHERE updated_at < %s", (limit_date,))
+                    deleted["memory_entries"] = cur.rowcount
+                if delegations_ttl_days is not None and delegations_ttl_days > 0:
+                    limit_date = datetime.now(timezone.utc) - timedelta(days=delegations_ttl_days)
+                    cur.execute("DELETE FROM delegations WHERE ts < %s", (limit_date,))
+                    deleted["delegations"] = cur.rowcount
+                conn.commit()
+        return deleted
 
     # -- Maintenance ---------------------------------------------------------
 
