@@ -14,9 +14,13 @@
 set -eu
 
 PROFILE="${CMD_PROFILE:-shell}"
-PG_TEST_HOST="${PG_TEST_HOST:-pg}"
+PG_TEST_HOST="${PG_TEST_HOST:-homelab-db}"
 PG_TEST_PORT="${PG_TEST_PORT:-5432}"
 PG_TEST_DSN="${PG_TEST_DSN:-}"
+export HEXUS_DB_NAME="${HEXUS_DB_NAME:-${MEMORY_PGVECTOR_DB_NAME:-hermes_memory}}"
+export HEXUS_DB_USER="${HEXUS_DB_USER:-${MEMORY_PGVECTOR_DB_USER:-hermes_memory}}"
+export HEXUS_DB_PASS="${HEXUS_DB_PASS:-${MEMORY_PGVECTOR_DB_PASS:?hexus database password required}}"
+export HEXUS_DSN="${HEXUS_DSN:-dbname=${HEXUS_DB_NAME} user=${HEXUS_DB_USER} password=${HEXUS_DB_PASS} host=homelab-db}"
 
 log() {
     printf "[entrypoint] %s\n" "$*"
